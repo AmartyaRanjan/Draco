@@ -1,0 +1,947 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ingestion Map</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout concept: engineering reference. A sticky section index, wide figures that scroll on their own, then a per-file reference generated from the same data as the call graph. */
+:root {
+  --bg: #f4f6f9; --panel: #ffffff; --fg: #151a21; --muted: #5a6574; --line: #d4dae2; --soft: #e9edf2;
+  --api: #2260c8; --queue: #a85207; --conv: #0a7a6e; --det: #6f3dbd; --db: #38842a; --ext: #667085;
+  --good: #1d8537; --scan: #bf540a; --amb: #94700a; --edge: #4a5462; --err: #b3261e;
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1217; --panel: #151b22; --fg: #e5e9ef; --muted: #9aa5b4; --line: #2a323d; --soft: #1c242d;
+    --api: #6fa3ff; --queue: #f0a54a; --conv: #3fcdb9; --det: #b594f2; --db: #82d36d; --ext: #9aa5b4;
+    --good: #5ccf7b; --scan: #ff9f5e; --amb: #e6c24b; --edge: #9aa5b4; --err: #ff8a80;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1217; --panel: #151b22; --fg: #e5e9ef; --muted: #9aa5b4; --line: #2a323d; --soft: #1c242d;
+  --api: #6fa3ff; --queue: #f0a54a; --conv: #3fcdb9; --det: #b594f2; --db: #82d36d; --ext: #9aa5b4;
+  --good: #5ccf7b; --scan: #ff9f5e; --amb: #e6c24b; --edge: #9aa5b4; --err: #ff8a80;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font-family: var(--sans); font-size: 15px; line-height: 1.55; }
+.wrap { max-width: 1320px; margin: 0 auto; padding-inline: 16px; padding-block: 0 64px; }
+h1, h2, h3 { line-height: 1.2; text-wrap: balance; margin: 0; }
+h1 { font-size: 2rem; font-weight: 600; letter-spacing: -0.01em; }
+h2 { font-size: 1.35rem; font-weight: 600; margin-top: 56px; }
+h3 { font-size: 1rem; font-weight: 600; }
+p { margin: 0; max-width: 72ch; }
+code, .mono { font-family: var(--mono); font-size: 0.86em; }
+a { color: var(--api); }
+.lead { color: var(--muted); margin-top: 10px; }
+header.top { padding-block: 40px 8px; }
+nav.index {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg);
+  border-bottom: 1px solid var(--line); padding-block: 10px; display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px;
+}
+nav.index a { color: var(--muted); text-decoration: none; }
+nav.index a:hover { color: var(--fg); text-decoration: underline; }
+section > p.sub { color: var(--muted); margin-top: 8px; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 18px; font-size: 13px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 7px; }
+.sw { width: 12px; height: 12px; border-radius: 3px; background: color-mix(in srgb, var(--c) 18%, var(--panel)); border: 1.5px solid var(--c); }
+.L-api { --c: var(--api); } .L-queue { --c: var(--queue); } .L-conv { --c: var(--conv); }
+.L-det { --c: var(--det); } .L-db { --c: var(--db); } .L-ext { --c: var(--ext); }
+.L-good { --c: var(--good); } .L-scan { --c: var(--scan); } .L-amb { --c: var(--amb); } .L-err { --c: var(--err); }
+
+figure { margin: 22px 0 0; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+figure .scroll { overflow-x: auto; padding: 12px; }
+figure svg { display: block; width: 100%; height: auto; }
+figcaption { padding: 12px 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13.5px; }
+figcaption b { color: var(--fg); font-weight: 600; }
+
+/* diagram marks */
+svg text { font-family: var(--sans); fill: var(--fg); font-size: 12.5px; }
+svg .mono-t { font-family: var(--mono); font-size: 11.5px; }
+svg .n rect, svg .n polygon { fill: color-mix(in srgb, var(--c, var(--ext)) 13%, var(--panel)); stroke: var(--c, var(--ext)); stroke-width: 1.5; }
+svg .n.group rect { fill: color-mix(in srgb, var(--c, var(--ext)) 6%, var(--panel)); stroke-dasharray: none; stroke-width: 1; }
+svg .n.dashed rect, svg .n.dashed polygon { stroke-dasharray: 5 4; fill: var(--panel); }
+svg .n .t1 { font-weight: 600; }
+svg .n .glabel { font-weight: 600; fill: var(--c, var(--muted)); font-size: 12px; letter-spacing: 0.03em; }
+svg .n.store line { stroke: var(--c, var(--ext)); stroke-width: 1.2; }
+svg .edge { fill: none; stroke: var(--edge); stroke-width: 1.5; }
+svg .edge.dash { stroke-dasharray: 5 4; }
+svg .edge.dot { stroke-dasharray: 2 3; }
+svg .lbl { fill: var(--muted); font-size: 11.5px; paint-order: stroke; stroke: var(--panel); stroke-width: 4px; stroke-linejoin: round; }
+svg .lbl.yes { fill: var(--good); font-weight: 600; }
+svg .lbl.no { fill: var(--err); font-weight: 600; }
+svg marker path { fill: var(--edge); }
+
+/* call graph */
+.cg .node { cursor: pointer; }
+.cg .node:focus { outline: none; }
+.cg .node:focus-visible rect { stroke-width: 3; }
+.cg .node rect { fill: color-mix(in srgb, var(--c) 13%, var(--panel)); stroke: var(--c); stroke-width: 1.3; }
+.cg .node.unused rect { stroke-dasharray: 4 3; fill: var(--panel); }
+.cg .node text { font-family: var(--mono); font-size: 11px; }
+.cg .node .kind { font-family: var(--sans); font-size: 10px; fill: var(--muted); }
+.cg .band { fill: color-mix(in srgb, var(--c) 5%, var(--panel)); stroke: var(--line); }
+.cg .bandlabel { font-family: var(--mono); font-size: 12px; font-weight: 500; fill: var(--c); }
+.cg .edge { opacity: 0.5; stroke-width: 1.2; }
+.cg.sel .node:not(.on) { opacity: 0.22; }
+.cg.sel .edge:not(.on) { opacity: 0.07; }
+.cg .edge.on { opacity: 1; stroke-width: 2.2; }
+.cg .node.pin rect { stroke-width: 3; }
+.info { padding: 14px 16px; border-top: 1px solid var(--line); min-height: 118px; font-size: 14px; }
+.info h3 { font-family: var(--mono); font-size: 14px; }
+.info .meta { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+.info p { margin-top: 8px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center; font-size: 12.5px; color: var(--muted); }
+.chip { font-family: var(--mono); font-size: 12px; border: 1px solid var(--line); background: var(--soft); color: var(--fg); border-radius: 4px; padding: 1px 7px; cursor: pointer; }
+.chip:hover { border-color: var(--muted); }
+button.chip { font-family: var(--mono); }
+a.chip { text-decoration: none; color: var(--fg); }
+
+/* tables */
+.tables { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 520px), 1fr)); gap: 20px; margin-top: 22px; }
+.tbl { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; min-width: 0; }
+.tbl h3 { padding: 12px 14px 4px; font-family: var(--mono); font-size: 14px; }
+.tbl > p { padding: 0 14px 10px; color: var(--muted); font-size: 13px; }
+.tbl .scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { text-align: left; padding: 7px 14px; border-top: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 500; font-size: 12px; letter-spacing: 0.03em; text-transform: uppercase; white-space: nowrap; }
+td:first-child { font-family: var(--mono); font-size: 12.5px; white-space: nowrap; }
+td.mono, td .mono { font-family: var(--mono); font-size: 12.5px; }
+
+/* file reference */
+details.file { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; margin-top: 14px; }
+details.file > summary { cursor: pointer; padding: 12px 16px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; list-style: none; }
+details.file > summary::-webkit-details-marker { display: none; }
+details.file > summary::before { content: ""; width: 10px; height: 10px; background: color-mix(in srgb, var(--c) 30%, var(--panel)); border: 1.5px solid var(--c); border-radius: 3px; align-self: center; }
+details.file[open] > summary { border-bottom: 1px solid var(--line); }
+.fpath { font-family: var(--mono); font-weight: 500; font-size: 14px; }
+.fnote { color: var(--muted); font-size: 13.5px; flex: 1 1 320px; }
+.items { display: grid; }
+.item { padding: 12px 16px; border-top: 1px solid var(--line); display: grid; gap: 4px; scroll-margin-top: 64px; }
+.item:first-child { border-top: 0; }
+.item.flash { background: color-mix(in srgb, var(--c) 12%, var(--panel)); }
+.item .head { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.item .nm { font-family: var(--mono); font-weight: 500; font-size: 13.5px; }
+.badge { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 3px; padding: 0 6px; text-transform: uppercase; letter-spacing: 0.04em; }
+.badge.warn { color: var(--amb); border-color: var(--amb); }
+.sig { font-family: var(--mono); font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.item p { font-size: 14px; }
+.item .rel { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; font-size: 12.5px; color: var(--muted); }
+.item.inner { margin-left: 22px; }
+
+.note { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; margin-top: 14px; }
+.note ul { margin: 8px 0 0; padding-left: 20px; }
+.note li { margin-top: 4px; }
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 16px; }
+.pill { font-size: 12px; font-weight: 600; border-radius: 999px; padding: 1px 9px; color: var(--c); border: 1.5px solid var(--c); }
+footer { margin-top: 56px; color: var(--muted); font-size: 13px; }
+@media (max-width: 600px) { h1 { font-size: 1.6rem; } th, td { padding: 6px 10px; } }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header class="top">
+    <h1>Ingestion Map</h1>
+    <p class="lead">Every file, function, table and data structure in the RAG ingestion system as of 2026-10-10, from the moment a client uploads a file to the Docling document that conversion produces. Chunking, embedding and Qdrant are empty files today, so the map stops there.</p>
+    <div class="legend" aria-label="Colour key">
+      <span class="L-api"><i class="sw"></i>API process</span>
+      <span class="L-queue"><i class="sw"></i>Queue and worker</span>
+      <span class="L-conv"><i class="sw"></i>Conversion (convert.py)</span>
+      <span class="L-det"><i class="sw"></i>PDF detection</span>
+      <span class="L-db"><i class="sw"></i>Storage (SQLite, uploads)</span>
+      <span class="L-ext"><i class="sw"></i>External or not built</span>
+    </div>
+  </header>
+  <nav class="index" aria-label="Sections">
+    <a href="#overview">System</a><a href="#callgraph">Call graph</a><a href="#upload">Upload flow</a><a href="#worker">Worker flow</a>
+    <a href="#classify">Page classification</a><a href="#data">Data</a><a href="#reference">File reference</a><a href="#tests">Tests</a><a href="#gaps">Loose ends</a>
+  </nav>
+
+  <section id="overview">
+    <h2>The system at a glance</h2>
+    <p class="sub">Two processes share two stores. The API accepts files and answers status requests. A separate RQ worker does the slow work, and only the worker ever imports Docling.</p>
+    <figure>
+      <div class="scroll"><div id="fig-overview"></div></div>
+      <figcaption><b>Where data moves.</b> The API writes the file to disk, records it in SQLite and puts a job on Redis. The worker pulls the job, reads the same file, runs detection (pypdf) and conversion (Docling), then writes page rows back to SQLite.</figcaption>
+    </figure>
+  </section>
+
+  <section id="callgraph">
+    <h2>Call graph</h2>
+    <p class="sub">Every function, class and method in <code>app/</code>. Hover or focus a node to see what it calls and what calls it; click to pin it. Dashed outlines have no caller inside <code>app/</code>.</p>
+    <figure>
+      <div class="scroll"><div id="fig-callgraph" class="cg"></div></div>
+      <div class="info" id="cg-info" aria-live="polite"></div>
+      <figcaption>
+        <b>Edge key.</b> Solid: direct call. Dashed: crosses a process boundary (RQ enqueue) or is imported lazily. Dotted: constructs an object or raises/catches an exception. Registry functions sit on the bottom row; <code>get_connection</code> is under all of them.
+      </figcaption>
+    </figure>
+  </section>
+
+  <section id="upload">
+    <h2>What happens on <code>POST /documents</code></h2>
+    <p class="sub">The whole upload path lives in <code>upload_document</code>. It hashes and size-checks while it streams, so a rejected file is cut off at most one chunk over the limit.</p>
+    <figure>
+      <div class="scroll"><div id="fig-upload"></div></div>
+      <figcaption><b>Three exits other than success:</b> bad request (400), too large (413), and duplicate content (200, no job). A failure after the row exists marks it <code>failed</code> so a retry is not mistaken for a duplicate.</figcaption>
+    </figure>
+  </section>
+
+  <section id="worker">
+    <h2>What the worker does with a job</h2>
+    <p class="sub">Document-level routing is the default. Page-level routing runs only when <code>PDF_ROUTING=page</code> and the pages disagree about OCR, and it falls back to whole-document OCR if anything does not check out.</p>
+    <figure>
+      <div class="scroll"><div id="fig-worker"></div></div>
+      <figcaption><b>Every uncertain case ends in OCR.</b> An unreadable PDF, a partly converted page range, or a merge that does not give back pages 1 to N all lead to a whole-document conversion with OCR on.</figcaption>
+    </figure>
+  </section>
+
+  <section id="classify">
+    <h2>How one page is classified</h2>
+    <p class="sub"><code>_classify_page</code> in <code>pdf_detector.py</code>. It never renders the page, never runs OCR and never decodes an image. It counts extracted characters and looks at image sizes in the page's resource dictionary.</p>
+    <figure>
+      <div class="scroll"><div id="fig-classify"></div></div>
+      <figcaption><b>Routing rule that uses this.</b> Only <span class="pill L-good">digital</span> pages skip OCR. <span class="pill L-scan">scanned</span> and <span class="pill L-amb">ambiguous</span> pages are converted with OCR on.</figcaption>
+    </figure>
+  </section>
+
+  <section id="data">
+    <h2>Data structures</h2>
+    <p class="sub">What is stored in SQLite, what travels in memory between the detector and the converter, and the states a document moves through.</p>
+    <div class="tables">
+      <div class="tbl">
+        <h3>documents</h3>
+        <p>One row per accepted upload. Created by <code>register_upload</code>, updated by <code>update_status</code> and <code>set_job_id</code>.</p>
+        <div class="scroll"><table>
+          <thead><tr><th>Column</th><th>Type</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td>document_id</td><td class="mono">TEXT, PK</td><td>UUID created in <code>upload_document</code>.</td></tr>
+            <tr><td>filename</td><td class="mono">TEXT</td><td>Original name with any path stripped.</td></tr>
+            <tr><td>file_path</td><td class="mono">TEXT</td><td>Absolute path of <code>uploads/&lt;id&gt;_&lt;filename&gt;</code>.</td></tr>
+            <tr><td>status</td><td class="mono">TEXT</td><td><code>uploaded</code>, <code>queued</code>, <code>processing</code>, <code>completed</code> or <code>failed</code>.</td></tr>
+            <tr><td>job_id</td><td class="mono">TEXT</td><td>RQ job id, set after enqueue.</td></tr>
+            <tr><td>error</td><td class="mono">TEXT</td><td>Error message of a failed job; cleared by the next <code>update_status</code> call.</td></tr>
+            <tr><td>content_hash</td><td class="mono">TEXT</td><td>SHA-256 hex of the file bytes. NULL on rows created before duplicate detection. Indexed by <code>idx_documents_content_hash</code> (not unique).</td></tr>
+            <tr><td>created_at</td><td class="mono">TEXT</td><td>Default <code>CURRENT_TIMESTAMP</code>.</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+      <div class="tbl">
+        <h3>document_pages</h3>
+        <p>One row per PDF page. Written by <code>save_pages</code>, which replaces a document's rows in one transaction. Read by <code>get_pages</code>.</p>
+        <div class="scroll"><table>
+          <thead><tr><th>Column</th><th>Type</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td>document_id</td><td class="mono">TEXT</td><td>Part of the primary key; no foreign key is enforced.</td></tr>
+            <tr><td>page_no</td><td class="mono">INTEGER</td><td>1-based. Part of the primary key.</td></tr>
+            <tr><td>page_type</td><td class="mono">TEXT</td><td><code>digital</code>, <code>scanned</code> or <code>ambiguous</code>.</td></tr>
+            <tr><td>char_count</td><td class="mono">INTEGER</td><td>Printable, non-space characters pypdf extracted.</td></tr>
+            <tr><td>image_count</td><td class="mono">INTEGER</td><td>Image XObjects found on the page.</td></tr>
+            <tr><td>large_image_count</td><td class="mono">INTEGER</td><td>Images of at least 250,000 pixels.</td></tr>
+            <tr><td>ocr_used</td><td class="mono">INTEGER</td><td>1 if the page was converted with OCR on, else 0.</td></tr>
+            <tr><td>reason</td><td class="mono">TEXT</td><td>Why the detector chose that type.</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <div class="tables">
+      <div class="tbl">
+        <h3>In-memory dataclasses</h3>
+        <p>All frozen. Defined in <code>pdf_detector.py</code> and <code>convert.py</code>.</p>
+        <div class="scroll"><table>
+          <thead><tr><th>Type</th><th>Fields</th></tr></thead>
+          <tbody>
+            <tr><td>DetectorConfig</td><td class="mono">min_digital_chars = 100 · max_scanned_chars = 10 · large_image_pixels = 250_000 · max_pages = None (all pages)</td></tr>
+            <tr><td>PageResult</td><td class="mono">index (0-based) · page_type · char_count · image_count · large_image_count · reason</td></tr>
+            <tr><td>PdfInspection</td><td class="mono">page_count · pages: list[PageResult]; helpers sampled, count(), digital_ratio, all_digital</td></tr>
+            <tr><td>PdfConversion</td><td class="mono">document: DoclingDocument · routing: "document" | "page" · page_ocr: dict[page_no, bool] · inspection: PdfInspection | None</td></tr>
+            <tr><td>PageType</td><td class="mono">Literal["digital", "scanned", "ambiguous"]</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+      <div class="tbl">
+        <h3>Docling options</h3>
+        <p>Built by <code>build_pdf_pipeline_options</code>. Docling's standard PDF pipeline in both modes.</p>
+        <div class="scroll"><table>
+          <thead><tr><th>Option</th><th>Value</th><th>Why</th></tr></thead>
+          <tbody>
+            <tr><td>do_ocr</td><td class="mono">True / False</td><td>The only thing routing changes.</td></tr>
+            <tr><td>do_table_structure</td><td class="mono">True</td><td>Table extraction stays on in both modes.</td></tr>
+            <tr><td>generate_page_images</td><td class="mono">False</td><td>No page images unless a later stage needs them.</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <figure>
+      <div class="scroll"><div id="fig-status"></div></div>
+      <figcaption><b>Document status.</b> Set by <code>update_status</code>. A document left in <code>processing</code> by a crashed worker has no recovery path yet, and it still blocks re-uploads of the same file.</figcaption>
+    </figure>
+  </section>
+
+  <section id="reference">
+    <h2>File reference</h2>
+    <p class="sub">Generated from the same data as the call graph, so the two cannot disagree. Click a chip to jump to that function.</p>
+    <div id="ref"></div>
+  </section>
+
+  <section id="tests">
+    <h2>Tests</h2>
+    <p class="sub">52 tests in <code>tests/</code>, run with <code>unittest</code>. Docling is stubbed when it is not installed, and mocked in the converter routing tests.</p>
+    <div class="tables">
+      <div class="tbl">
+        <div class="scroll"><table>
+          <thead><tr><th>File</th><th>Tests</th><th>What it covers</th></tr></thead>
+          <tbody>
+            <tr><td>test_pdf_detector.py</td><td class="mono">14</td><td>digital, scanned, mixed, empty, malformed, missing, password-protected and empty-password PDFs; text with large and small images; blank and short pages; thresholds; even sampling.</td></tr>
+            <tr><td>test_convert.py</td><td class="mono">20</td><td>OCR routing per case, detector-failure fallback, converter reuse per OCR mode, page runs and merge, fallbacks on partial status or page mismatch, <code>PDF_ROUTING</code>, <code>page_records</code>, plus two tests against real Docling classes.</td></tr>
+            <tr><td>test_registry.py</td><td class="mono">10</td><td>duplicate lookup, failed rows not blocking, 8-thread race, migration of an old database, saving and replacing page rows.</td></tr>
+            <tr><td>test_routes.py</td><td class="mono">5</td><td>new upload, duplicate upload, different content, failed enqueue then retry, pages endpoint.</td></tr>
+            <tr><td>test_worker.py</td><td class="mono">3</td><td>PDF converted and pages saved, non-PDF skipped, failure marks the document failed.</td></tr>
+            <tr><td>pdf_factory.py</td><td class="mono">helper</td><td><code>add_page(writer, text, image)</code> and <code>write_pdf(path, pages, password)</code> build test PDFs with pypdf only.</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+      <div class="note">
+        <h3>Run them</h3>
+        <p style="margin-top:8px"><code>.venv/bin/python -m unittest discover -s tests -t . -v</code></p>
+        <p style="margin-top:10px;color:var(--muted);font-size:13.5px">Not covered: a real PDF through real Docling models, OCR quality, and page-level routing against real conversions.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="gaps">
+    <h2>Loose ends visible in the code</h2>
+    <div class="two">
+      <div class="note"><h3>Unused inside <code>app/</code></h3>
+        <ul>
+          <li><code>registry.create_document</code> was replaced by <code>register_upload</code> and has no caller.</li>
+          <li><code>convert.convert_document</code> is a convenience wrapper that nothing calls yet.</li>
+          <li><code>PdfInspection.sampled</code>, <code>digital_ratio</code> and <code>all_digital</code> are only used by tests; routing reads <code>page_ocr</code> instead.</li>
+          <li><code>queue.py</code> imports <code>load_dotenv</code> but never calls it.</li>
+        </ul>
+      </div>
+      <div class="note"><h3>Not built or not wired</h3>
+        <ul>
+          <li><code>chunk.py</code>, <code>embed.py</code>, <code>pipeline.py</code>, <code>db/qdrant.py</code> and <code>core/config.py</code> are empty files.</li>
+          <li>The worker discards the Docling document after saving page rows, then marks the document <code>completed</code>.</li>
+          <li><code>PDF_ROUTING</code> is read straight from the environment inside <code>convert.py</code>.</li>
+          <li><code>requirements.txt</code> lists neither <code>docling</code> nor <code>pypdf</code>.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <footer>Built from the source in <code>/home/amartyaranjan888/projects/rag</code>. If a function changes, this page does not update itself.</footer>
+</div>
+
+<script>
+/* ---------- small SVG layout helper ---------- */
+const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+let UID = 0;
+
+function anchor(n, side, off) {
+  off = off || 0;
+  if (side === "l") return [n.x, n.y + n.h / 2 + off];
+  if (side === "r") return [n.x + n.w, n.y + n.h / 2 + off];
+  if (side === "t") return [n.x + n.w / 2 + off, n.y];
+  return [n.x + n.w / 2 + off, n.y + n.h];
+}
+const isH = s => s === "l" || s === "r";
+
+function clean(pts) {
+  const near = (a, b) => Math.abs(a - b) < 0.01;
+  const out = [pts[0]];
+  for (let i = 1; i < pts.length; i++) {
+    const p = out[out.length - 1], q = pts[i];
+    if (near(p[0], q[0]) && near(p[1], q[1])) continue;
+    out.push(q);
+  }
+  const res = [out[0]];
+  for (let i = 1; i < out.length - 1; i++) {
+    const a = res[res.length - 1], b = out[i], c = out[i + 1];
+    const col = (near(a[0], b[0]) && near(b[0], c[0])) || (near(a[1], b[1]) && near(b[1], c[1]));
+    if (!col) res.push(b);
+  }
+  res.push(out[out.length - 1]);
+  return res;
+}
+
+function route(e, N) {
+  const a = N[e.a], b = N[e.b];
+  const p1 = anchor(a, e.fs, e.fo), p2 = anchor(b, e.ts, e.to);
+  let pts;
+  if (e.gx !== undefined) pts = [p1, [e.gx, p1[1]], [e.gx, p2[1]], p2];
+  else if (isH(e.fs) && isH(e.ts)) { const mx = e.mx !== undefined ? e.mx : (p1[0] + p2[0]) / 2; pts = [p1, [mx, p1[1]], [mx, p2[1]], p2]; }
+  else if (!isH(e.fs) && !isH(e.ts)) { const my = e.my !== undefined ? e.my : (p1[1] + p2[1]) / 2; pts = [p1, [p1[0], my], [p2[0], my], p2]; }
+  else if (isH(e.fs)) pts = [p1, [p2[0], p1[1]], p2];
+  else pts = [p1, [p1[0], p2[1]], p2];
+  return clean(pts);
+}
+
+function labelPos(e, pts) {
+  if (e.lx !== undefined) return { x: e.lx, y: e.ly, anchor: e.anchor || "middle" };
+  if (e.lpos === "start") {
+    const p = pts[0], q = pts[1];
+    const dx = Math.sign(q[0] - p[0]), dy = Math.sign(q[1] - p[1]);
+    if (dy !== 0) return { x: p[0] + 8, y: p[1] + dy * 17, anchor: "start" };
+    return { x: p[0] + dx * 20, y: p[1] - 6, anchor: "middle" };
+  }
+  let bi = 0, best = -1;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const len = Math.abs(pts[i + 1][0] - pts[i][0]) + Math.abs(pts[i + 1][1] - pts[i][1]);
+    if (len > best) { best = len; bi = i; }
+  }
+  const p = pts[bi], q = pts[bi + 1];
+  const mx = (p[0] + q[0]) / 2, my = (p[1] + q[1]) / 2;
+  if (Math.abs(p[0] - q[0]) < 0.01) return { x: mx + 7, y: my + 4, anchor: "start" };
+  return { x: mx, y: my - 7, anchor: "middle" };
+}
+
+function textBlock(x, y, lines, cls, anchor, lineH) {
+  lineH = lineH || 14;
+  const tspans = lines.map((l, i) => `<tspan x="${x}" dy="${i === 0 ? 0 : lineH}">${esc(l)}</tspan>`).join("");
+  return `<text class="${cls}" x="${x}" y="${y}" text-anchor="${anchor}">${tspans}</text>`;
+}
+
+function nodeSvg(n) {
+  const shape = n.shape || "box";
+  const cls = ["n", shape, n.layer ? "L-" + n.layer : "", n.dashed ? "dashed" : ""].join(" ");
+  let g = `<g class="${cls}">`;
+  if (shape === "diamond") {
+    g += `<polygon points="${n.x + n.w / 2},${n.y} ${n.x + n.w},${n.y + n.h / 2} ${n.x + n.w / 2},${n.y + n.h} ${n.x},${n.y + n.h / 2}"/>`;
+  } else if (shape === "term") {
+    g += `<rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" rx="${Math.min(n.h / 2, 26)}"/>`;
+  } else if (shape === "group") {
+    g += `<rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" rx="10"/>`;
+  } else if (shape === "store") {
+    g += `<rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" rx="4"/><line x1="${n.x}" y1="${n.y + 9}" x2="${n.x + n.w}" y2="${n.y + 9}"/>`;
+  } else {
+    g += `<rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" rx="6"/>`;
+  }
+  if (shape === "group") {
+    g += `<text class="glabel" x="${n.x + 12}" y="${n.y + 19}">${esc(n.lines[0])}</text>`;
+  } else {
+    const lh = 15, total = n.lines.length;
+    const y0 = n.y + n.h / 2 - ((total - 1) * lh) / 2 + 4.5 + (shape === "store" ? 4 : 0);
+    const mono = n.mono ? " mono-t" : "";
+    const tspans = n.lines.map((l, i) => `<tspan x="${n.x + n.w / 2}" dy="${i === 0 ? 0 : lh}"${i === 0 && n.title ? ' class="t1"' : ""}>${esc(l)}</tspan>`).join("");
+    g += `<text class="${mono.trim()}" x="${n.x + n.w / 2}" y="${y0}" text-anchor="middle">${tspans}</text>`;
+  }
+  return g + "</g>";
+}
+
+function drawFlow(targetId, spec) {
+  const uid = "m" + (++UID);
+  const N = {};
+  spec.nodes.forEach(n => { N[n.id] = n; });
+  let svg = `<svg viewBox="0 0 ${spec.w} ${spec.h}" role="img" aria-label="${esc(spec.aria)}" style="min-width:${spec.minw || Math.round(spec.w * 0.8)}px">`;
+  svg += `<defs><marker id="${uid}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>`;
+  spec.nodes.filter(n => n.shape === "group").forEach(n => { svg += nodeSvg(n); });
+  spec.edges.forEach(e => {
+    const pts = route(e, N);
+    const d = pts.map((p, i) => (i ? "L" : "M") + p[0] + " " + p[1]).join(" ");
+    svg += `<path class="edge ${e.cls || ""}" d="${d}" marker-end="url(#${uid})"/>`;
+  });
+  spec.nodes.filter(n => n.shape !== "group").forEach(n => { svg += nodeSvg(n); });
+  spec.edges.forEach(e => {
+    if (!e.label) return;
+    const pts = route(e, N);
+    const lp = labelPos(e, pts);
+    const lines = String(e.label).split("\n");
+    const y = lp.anchor === "middle" && !(e.lx !== undefined) ? lp.y - (lines.length - 1) * 13 : lp.y;
+    const kind = e.label === "yes" ? "yes" : e.label === "no" ? "no" : "";
+    svg += textBlock(lp.x, y, lines, "lbl " + kind, lp.anchor, 13);
+  });
+  svg += "</svg>";
+  document.getElementById(targetId).innerHTML = svg;
+}
+
+/* vertical-flow helpers: rows on a fixed step */
+function flowRows(top, step) { return i => top + 26 + i * step; }
+function mk(id, cx, cy, w, h, shape, lines, layer, extra) {
+  return Object.assign({ id, x: cx - w / 2, y: cy - h / 2, w, h, shape, lines, layer }, extra || {});
+}
+
+/* ---------- 1. system overview ---------- */
+drawFlow("fig-overview", {
+  w: 1500, h: 670, minw: 1180,
+  aria: "Architecture: a client calls the API process; the API writes files to uploads, rows to SQLite and jobs to Redis; the worker process pulls jobs, reads the file, and uses pypdf and Docling.",
+  nodes: [
+    { id: "client", x: 10, y: 140, w: 100, h: 60, shape: "term", lines: ["Client"], layer: "ext" },
+    { id: "apig", x: 220, y: 40, w: 360, h: 390, shape: "group", lines: ["API process  ·  uvicorn app.main:app"], layer: "api" },
+    { id: "routes", x: 235, y: 75, w: 330, h: 190, shape: "box", layer: "api", title: true,
+      lines: ["app/api/routes.py", "POST /documents → upload_document()", "GET /documents/{id} → document_status()", "GET /documents/{id}/pages → document_pages()", "", "hashes and size-checks while streaming"] },
+    { id: "main", x: 235, y: 295, w: 330, h: 100, shape: "box", layer: "api", title: true,
+      lines: ["app/main.py", "startup() → init_db()", "GET /health · includes the router"] },
+    { id: "redis", x: 690, y: 75, w: 240, h: 95, shape: "box", layer: "queue", title: true,
+      lines: ["Redis queue \"ingestion\"", "app/core/queue.py", "job timeout 3600 s"] },
+    { id: "db", x: 690, y: 210, w: 240, h: 200, shape: "store", layer: "db", title: true,
+      lines: ["documents.db  ·  SQLite", "table documents", "table document_pages", "index on content_hash", "", "access via app/db/registry.py"] },
+    { id: "uploads", x: 690, y: 450, w: 240, h: 80, shape: "store", layer: "db", title: true,
+      lines: ["uploads/<uuid>_<name>", "raw bytes, one file per upload"] },
+    { id: "wg", x: 1040, y: 40, w: 230, h: 470, shape: "group", lines: ["Worker process  ·  rq worker"], layer: "queue" },
+    { id: "worker", x: 1055, y: 75, w: 200, h: 95, shape: "box", layer: "queue", title: true,
+      lines: ["worker.py", "process_document()", "imports convert lazily"] },
+    { id: "convert", x: 1055, y: 210, w: 200, h: 130, shape: "box", layer: "conv", title: true,
+      lines: ["convert.py", "convert_pdf() picks routing", "_convert · _convert_by_page", "one converter per OCR mode"] },
+    { id: "detect", x: 1055, y: 380, w: 200, h: 110, shape: "box", layer: "det", title: true,
+      lines: ["pdf_detector.py", "inspect_pdf() → PdfInspection", "page type per page"] },
+    { id: "docling", x: 1380, y: 210, w: 110, h: 130, shape: "box", layer: "ext", title: true,
+      lines: ["Docling", "layout", "tables", "OCR (optional)"] },
+    { id: "pypdf", x: 1380, y: 380, w: 110, h: 110, shape: "box", layer: "ext", title: true,
+      lines: ["pypdf", "PdfReader", "extract_text"] },
+    { id: "future", x: 1055, y: 545, w: 200, h: 90, shape: "box", layer: "ext", dashed: true, title: true,
+      lines: ["chunk.py · embed.py", "pipeline.py · qdrant.py", "empty files, planned"] }
+  ],
+  edges: [
+    { a: "client", fs: "r", b: "routes", ts: "l", label: "HTTP" },
+    { a: "routes", fs: "r", fo: -48, b: "redis", ts: "l", label: "enqueue job" },
+    { a: "routes", fs: "r", fo: 65, b: "db", ts: "l", to: -75, label: "registry calls" },
+    { a: "routes", fs: "r", fo: 90, b: "uploads", ts: "l", mx: 655, label: "writes chunks", lx: 648, ly: 446, anchor: "end" },
+    { a: "main", fs: "r", b: "db", ts: "l", to: 35, label: "init_db()" },
+    { a: "redis", fs: "r", b: "worker", ts: "l", label: "pops job" },
+    { a: "worker", fs: "l", fo: 30, b: "db", ts: "r", to: -50, mx: 985, label: "update_status,\nsave_pages", lx: 978, ly: 186, anchor: "end" },
+    { a: "worker", fs: "b", b: "convert", ts: "t", label: "convert_pdf(path)" },
+    { a: "convert", fs: "b", b: "detect", ts: "t", label: "inspect_pdf(path)" },
+    { a: "convert", fs: "l", fo: 40, b: "uploads", ts: "r", mx: 1000, label: "reads PDF", lx: 995, ly: 430, anchor: "end" },
+    { a: "convert", fs: "r", b: "docling", ts: "l", label: "convert()" },
+    { a: "detect", fs: "r", b: "pypdf", ts: "l", label: "extract_text()" },
+    { a: "worker", fs: "r", b: "future", ts: "r", gx: 1300, cls: "dash", label: "conversion.document\n(not wired yet)", lx: 1308, ly: 520, anchor: "start" }
+  ]
+});
+
+/* ---------- 2. upload flow ---------- */
+(function () {
+  const R = flowRows(20, 92), MX = 300, RX = 770, W = 340;
+  const nodes = [
+    mk("a0", MX, R(0), W, 52, "term", ["Client", "POST /documents (multipart file)"], "ext", { title: true }),
+    mk("a1", MX, R(1), W, 52, "box", ["upload_document(file)", "app/api/routes.py"], "api", { title: true }),
+    mk("a2", MX, R(2), 360, 72, "diamond", ["filename present?"], "api"),
+    mk("e2", RX, R(2), 330, 52, "box", ["400  Filename is required"], "err"),
+    mk("a3", MX, R(3), W, 52, "box", ["document_id = uuid4()", "path = uploads/<id>_<safe name>"], "api"),
+    mk("a4", MX, R(4), W, 52, "box", ["Read next chunk (up to 1 MiB)", "size += len(chunk) · sha256.update(chunk)"], "api"),
+    mk("a5", MX, R(5), 360, 72, "diamond", ["size over 100 MiB?"], "api"),
+    mk("e5", RX, R(5), 330, 52, "box", ["413  partial file deleted"], "err"),
+    mk("a6", MX, R(6), W, 52, "box", ["destination.write(chunk)", "repeat until the upload ends"], "api"),
+    mk("a7", MX, R(7), W, 66, "box", ["register_upload(id, name, path, sha256)", "BEGIN IMMEDIATE · find same hash,", "status not failed"], "db"),
+    mk("a8", MX, R(8), 360, 72, "diamond", ["identical content found?"], "db"),
+    mk("e8", RX, R(8), 330, 66, "box", ["Delete the new file · return 200", "{duplicate: true, existing", "document_id, job_id, status}"], "ext"),
+    mk("a9", MX, R(9), W, 52, "box", ["INSERT documents row (status uploaded)", "update_status(id, \"queued\")"], "db"),
+    mk("a10", MX, R(10), W, 52, "box", ["ingestion_queue.enqueue(process_document,", "id, path)  ·  job timeout 3600 s"], "queue"),
+    mk("e10", RX, R(10), 330, 66, "box", ["Any failure after the file is saved:", "delete file, mark document failed,", "return 503"], "err"),
+    mk("a11", MX, R(11), W, 52, "box", ["set_job_id(id, job.id)"], "db"),
+    mk("a12", MX, R(12), W, 52, "term", ["202 Accepted", "{document_id, job_id, duplicate: false}"], "ext", { title: true })
+  ];
+  const E = [
+    ["a0", "a1"], ["a1", "a2"], ["a2", "a3", "yes"], ["a3", "a4"], ["a4", "a5"], ["a5", "a6", "no"],
+    ["a7", "a8"], ["a8", "a9", "no"], ["a9", "a10"], ["a10", "a11"], ["a11", "a12"]
+  ].map(([a, b, l]) => ({ a, b, fs: "b", ts: "t", label: l, lpos: l ? "start" : undefined }));
+  E.push({ a: "a6", b: "a7", fs: "b", ts: "t", label: "upload ended", lpos: "start" });
+  E.push({ a: "a2", fs: "r", b: "e2", ts: "l", label: "no", lpos: "start" });
+  E.push({ a: "a5", fs: "r", b: "e5", ts: "l", label: "yes", lpos: "start" });
+  E.push({ a: "a8", fs: "r", b: "e8", ts: "l", label: "yes", lpos: "start" });
+  E.push({ a: "a10", fs: "r", b: "e10", ts: "l", label: "fails", cls: "dash", lpos: "start" });
+  E.push({ a: "a6", fs: "l", b: "a4", ts: "l", gx: 82, label: "next chunk", lx: 78, ly: R(5) + 4, anchor: "end" });
+  drawFlow("fig-upload", {
+    w: 980, h: R(12) + 60, minw: 760, nodes, edges: E,
+    aria: "Flow of upload_document: validate filename, stream chunks while hashing and checking size, register the upload, return the existing document on duplicate content, otherwise enqueue a job and return 202."
+  });
+})();
+
+/* ---------- 3. worker flow ---------- */
+(function () {
+  const R = flowRows(20, 88), LX = 170, MX = 520, RX = 900;
+  const nodes = [
+    mk("m0", MX, R(0), 360, 52, "term", ["RQ worker runs", "process_document(document_id, file_path)"], "queue", { title: true }),
+    mk("m1", MX, R(1), 360, 46, "box", ["update_status(id, \"processing\")"], "db"),
+    mk("m2", MX, R(2), 340, 72, "diamond", ["file extension is .pdf?"], "queue"),
+    mk("l2", LX, R(2), 260, 52, "box", ["Skip conversion", "other formats are not built yet"], "ext"),
+    mk("m3", MX, R(3), 360, 56, "box", ["convert_pdf(path, routing)", "routing = argument, $PDF_ROUTING or \"document\""], "conv", { title: true }),
+    mk("m4", MX, R(4), 360, 56, "box", ["inspect_pdf(path)", "classify every page"], "det", { title: true }),
+    mk("m5", MX, R(5), 340, 80, "diamond", ["PdfDetectionError?", "empty, malformed, encrypted"], "det"),
+    mk("l5", LX, R(5), 260, 72, "box", ["_convert(path, do_ocr=True)", "whole document, OCR on", "page_ocr = {} · inspection = None"], "conv"),
+    mk("m6", MX, R(6), 360, 56, "box", ["page_ocr[page] = page_type is not digital", "digital → False · scanned, ambiguous → True"], "conv"),
+    mk("m7", MX, R(7), 340, 80, "diamond", ["routing = \"page\" and", "the decisions differ?"], "conv"),
+    mk("r7", RX, R(7), 320, 70, "box", ["_ocr_runs(page_ocr)", "consecutive pages with one decision", "e.g. (False,1,1) (True,2,3) (False,4,4)"], "conv"),
+    mk("m8", MX, R(8), 360, 56, "box", ["do_ocr = any(page_ocr)", "_convert(path, do_ocr): whole document"], "conv"),
+    mk("r8", RX, R(8), 320, 56, "box", ["_convert(path, do_ocr, page_range)", "per run · needs SUCCESS and all pages"], "conv"),
+    mk("r9", RX, R(9), 320, 56, "box", ["DoclingDocument.concatenate(docs)", "restore origin and name · check pages 1..N"], "conv"),
+    mk("m10", MX, R(10), 360, 56, "box", ["return PdfConversion(document, routing,", "page_ocr, inspection)"], "conv", { title: false }),
+    mk("r10", RX, R(10), 300, 72, "diamond", ["runs and merge valid?"], "conv"),
+    mk("r11", RX, R(11), 320, 66, "box", ["_convert(path, True)", "fallback: whole document, OCR on", "routing = \"document\""], "conv"),
+    mk("m11", MX, R(11), 360, 56, "box", ["save_pages(id, conversion.page_records())", "replaces this document's page rows"], "db"),
+    mk("m12", MX, R(12), 360, 56, "box", ["TODO: chunking, embedding, Qdrant", "chunk.py, embed.py, pipeline.py are empty"], "ext", { dashed: true }),
+    mk("m13", MX, R(13), 360, 46, "box", ["update_status(id, \"completed\")"], "db"),
+    mk("m14", MX, R(14), 360, 46, "term", ["return {document_id, status: \"completed\"}"], "queue"),
+    mk("x12", LX, R(12), 260, 72, "box", ["Any exception in these steps:", "update_status(id, \"failed\", error)", "then re-raise to RQ"], "err", { dashed: true })
+  ];
+  const v = (a, b, label) => ({ a, b, fs: "b", ts: "t", label, lpos: label ? "start" : undefined });
+  const edges = [
+    v("m0", "m1"), v("m1", "m2"), v("m2", "m3", "yes"), v("m3", "m4"), v("m4", "m5"), v("m5", "m6", "no"), v("m6", "m7"),
+    v("m7", "m8", "no"), { a: "m8", b: "m10", fs: "b", ts: "t" },
+    v("m10", "m11"), v("m11", "m12"), v("m12", "m13"), v("m13", "m14"),
+    { a: "m2", fs: "l", b: "l2", ts: "r", label: "no", lpos: "start" },
+    { a: "m5", fs: "l", b: "l5", ts: "r", label: "yes", lpos: "start" },
+    { a: "l5", fs: "b", b: "m10", ts: "l" },
+    { a: "l2", fs: "l", b: "m13", ts: "l", gx: 14 },
+    { a: "m7", fs: "r", b: "r7", ts: "l", label: "yes", lpos: "start" },
+    v("r7", "r8"), v("r8", "r9"), v("r9", "r10"),
+    { a: "r10", fs: "l", b: "m10", ts: "r", label: "yes", lpos: "start" },
+    v("r10", "r11", "no"),
+    { a: "r11", fs: "l", b: "m10", ts: "r" }
+  ];
+  drawFlow("fig-worker", {
+    w: 1100, h: R(14) + 60, minw: 880, nodes, edges,
+    aria: "Flow of process_document: mark processing, if the file is a PDF run convert_pdf which inspects pages and routes OCR for the whole document or per page with fallbacks, save page rows, mark completed; any exception marks the document failed."
+  });
+})();
+
+/* ---------- 4. page classification ---------- */
+(function () {
+  const rows = [45, 150, 255, 360, 465, 570], C0 = 230, C1 = 600, C2 = 920;
+  const nodes = [
+    mk("t", C0, rows[0], 400, 74, "box", ["page.extract_text() → chars (printable, non-space)", "image XObjects on the page → images, large images", "large = width × height ≥ 250,000 pixels"], "det"),
+    mk("d1", C0, rows[1], 280, 76, "diamond", ["extraction raised?"], "det"),
+    mk("a1", C1, rows[1], 250, 58, "box", ["AMBIGUOUS", "inspection failed"], "amb", { title: true }),
+    mk("d2", C0, rows[2], 280, 76, "diamond", ["chars ≥ 100?"], "det"),
+    mk("d3", C1, rows[2], 280, 76, "diamond", ["large image on page?"], "det"),
+    mk("a2", C2, rows[2], 260, 62, "box", ["AMBIGUOUS", "text plus a large image", "(the image may hold more text)"], "amb", { title: true }),
+    mk("g", C1, rows[3], 250, 58, "box", ["DIGITAL", "usable text layer"], "good", { title: true }),
+    mk("d4", C0, rows[4], 280, 76, "diamond", ["chars ≤ 10?"], "det"),
+    mk("d5", C1, rows[4], 280, 76, "diamond", ["page has images?"], "det"),
+    mk("s", C2, rows[4], 260, 58, "box", ["SCANNED", "no text layer, page has images"], "scan", { title: true }),
+    mk("a3", C1, rows[5], 250, 62, "box", ["AMBIGUOUS", "no text and no images", "(blank or vector-drawn text)"], "amb", { title: true }),
+    mk("a4", C0, rows[5], 250, 62, "box", ["AMBIGUOUS", "11 to 99 characters:", "too little to be conclusive"], "amb", { title: true })
+  ];
+  const edges = [
+    { a: "t", fs: "b", b: "d1", ts: "t" },
+    { a: "d1", fs: "r", b: "a1", ts: "l", label: "yes", lpos: "start" },
+    { a: "d1", fs: "b", b: "d2", ts: "t", label: "no", lpos: "start" },
+    { a: "d2", fs: "r", b: "d3", ts: "l", label: "yes", lpos: "start" },
+    { a: "d3", fs: "r", b: "a2", ts: "l", label: "yes", lpos: "start" },
+    { a: "d3", fs: "b", b: "g", ts: "t", label: "no", lpos: "start" },
+    { a: "d2", fs: "b", b: "d4", ts: "t", label: "no", lpos: "start" },
+    { a: "d4", fs: "r", b: "d5", ts: "l", label: "yes", lpos: "start" },
+    { a: "d5", fs: "r", b: "s", ts: "l", label: "yes", lpos: "start" },
+    { a: "d5", fs: "b", b: "a3", ts: "t", label: "no", lpos: "start" },
+    { a: "d4", fs: "b", b: "a4", ts: "t", label: "no", lpos: "start" }
+  ];
+  drawFlow("fig-classify", {
+    w: 1080, h: 640, minw: 860, nodes, edges,
+    aria: "Decision tree for classifying a page: an extraction error gives ambiguous; 100 or more characters gives digital unless a large image is present, which gives ambiguous; 10 or fewer characters gives scanned if the page has images, otherwise ambiguous; 11 to 99 characters gives ambiguous."
+  });
+})();
+
+/* ---------- 5. status machine ---------- */
+(function () {
+  const nodes = [
+    { id: "u", x: 20, y: 40, w: 150, h: 54, shape: "term", lines: ["uploaded"], layer: "db" },
+    { id: "q", x: 270, y: 40, w: 150, h: 54, shape: "term", lines: ["queued"], layer: "queue" },
+    { id: "p", x: 520, y: 40, w: 150, h: 54, shape: "term", lines: ["processing"], layer: "conv" },
+    { id: "c", x: 770, y: 40, w: 150, h: 54, shape: "term", lines: ["completed"], layer: "good" },
+    { id: "f", x: 520, y: 170, w: 150, h: 54, shape: "term", lines: ["failed"], layer: "err" },
+    { id: "n", x: 20, y: 150, w: 290, h: 84, shape: "box", dashed: true, lines: ["A failed document does not block", "uploading the same file again.", "The new upload gets a new document_id."], layer: "ext" }
+  ];
+  const edges = [
+    { a: "u", fs: "r", b: "q", ts: "l", label: "API queues it" },
+    { a: "q", fs: "r", b: "p", ts: "l", label: "worker starts" },
+    { a: "p", fs: "r", b: "c", ts: "l", label: "no exception" },
+    { a: "p", fs: "b", b: "f", ts: "t", label: "exception,\nerror saved", lx: 600, ly: 130, anchor: "start" },
+    { a: "q", fs: "b", b: "f", ts: "l", label: "enqueue fails (503)" }
+  ];
+  drawFlow("fig-status", { w: 960, h: 270, minw: 720, nodes, edges, aria: "Document status machine: uploaded, queued, processing, completed; failed is reached from queued when enqueueing fails and from processing on an exception." });
+})();
+
+/* ---------- 6. data model for call graph and reference ---------- */
+const FILES = [
+  { id: "main", path: "app/main.py", layer: "api", note: "FastAPI application object. Wires the router and prepares the database on startup.",
+    imports: "fastapi, app.api.routes, app.db.registry",
+    items: [
+      { id: "main.app", name: "app", kind: "const", sig: "FastAPI(title=\"RAG Ingestion API\", version=\"0.1.0\")", desc: "The ASGI application. Includes the router from routes.py." },
+      { id: "main.startup", name: "startup()", kind: "func", sig: "@app.on_event(\"startup\")  def startup() -> None", desc: "Runs once when the API starts. Calls init_db() so the tables exist and older databases gain the content_hash column." },
+      { id: "main.health", name: "health()", kind: "func", sig: "GET /health  def health() -> dict", desc: "Returns {\"status\": \"ok\"}. Does not check Redis or the database." }
+    ] },
+  { id: "routes", path: "app/api/routes.py", layer: "api", note: "HTTP endpoints. The only place uploads are accepted, hashed and queued.",
+    imports: "hashlib, uuid, fastapi, app.core.queue, app.db.registry, app.ingestion.worker (process_document, not Docling)",
+    items: [
+      { id: "routes.UPLOAD_DIR", name: "UPLOAD_DIR", kind: "const", sig: "Path(app/storage/uploads)", desc: "Where uploaded files are written." },
+      { id: "routes.MAX_FILE_SIZE", name: "MAX_FILE_SIZE", kind: "const", sig: "100 * 1024 * 1024", desc: "100 MiB, counted in bytes across all chunks. The error text says 100 MB." },
+      { id: "routes.upload_document", name: "upload_document(file)", kind: "func", sig: "POST /documents → 202  async def upload_document(file: UploadFile)", ext: "hashlib.sha256, uuid4, JSONResponse", desc: "Streams the upload to disk in 1 MiB chunks while updating a SHA-256 and enforcing the size limit. Registers the document, or returns the existing one with 200 if the content is a duplicate. Otherwise marks it queued, enqueues process_document and stores the job id. On any failure deletes the file and, if a row exists, marks it failed." },
+      { id: "routes.document_status", name: "document_status(document_id)", kind: "func", sig: "GET /documents/{document_id}", desc: "Returns the documents row as JSON, or 404." },
+      { id: "routes.document_pages", name: "document_pages(document_id)", kind: "func", sig: "GET /documents/{document_id}/pages", desc: "Returns the document_pages rows in page order, or 404 if the document does not exist." }
+    ] },
+  { id: "queue", path: "app/core/queue.py", layer: "queue", note: "Redis connection and the RQ queue. No functions.",
+    imports: "os, redis, dotenv.load_dotenv (imported, never called), rq.Queue",
+    items: [
+      { id: "queue.redis_conn", name: "redis_conn", kind: "const", sig: "redis.Redis.from_url($REDIS_URL or redis://localhost:6379/0)", desc: "Connection shared by the queue. Does not connect until first use." },
+      { id: "queue.ingestion_queue", name: "ingestion_queue", kind: "const", sig: "Queue(\"ingestion\", connection=redis_conn, default_timeout=3600)", desc: "The queue upload_document enqueues onto. Jobs are enqueued with job_timeout 3600 s and result_ttl 86400 s." }
+    ] },
+  { id: "worker", path: "app/ingestion/worker.py", layer: "queue", note: "The RQ job. Runs conversion for PDFs and records the outcome.",
+    imports: "pathlib, app.db.registry; app.ingestion.convert is imported inside the function so the API never loads Docling",
+    items: [
+      { id: "worker.process_document", name: "process_document(document_id, file_path)", kind: "func", sig: "def process_document(document_id: str, file_path: str) -> dict", desc: "Sets status processing. For .pdf files, calls convert_pdf and saves the page rows; other types are skipped. Chunking, embedding and Qdrant are TODO, so it then sets completed and returns {document_id, status}. Any exception sets failed with the message and is re-raised." }
+    ] },
+  { id: "convert", path: "app/ingestion/convert.py", layer: "conv", note: "Docling conversion with OCR routing. Uses Docling's standard PDF pipeline so layout and table structure stay on.",
+    imports: "docling (DocumentConverter, PdfFormatOption, PdfPipelineOptions, ConversionStatus, InputFormat), docling_core.DoclingDocument, app.ingestion.pdf_detector",
+    items: [
+      { id: "convert.ROUTING_MODES", name: "ROUTING_MODES", kind: "const", sig: "(\"document\", \"page\")", desc: "Valid values for the routing argument and the PDF_ROUTING environment variable." },
+      { id: "convert.PdfConversion", name: "PdfConversion", kind: "class", sig: "@dataclass(frozen=True)  document · routing · page_ocr · inspection", desc: "Result of convert_pdf: the Docling document, the routing actually used, the OCR decision per 1-based page, and the PdfInspection (None if detection failed)." },
+      { id: "convert.PdfConversion.page_records", name: ".page_records()", kind: "method", sig: "def page_records(self) -> list[dict]", desc: "One dict per inspected page with the document_pages columns (page_no is 1-based, ocr_used is 0 or 1). Empty if the PDF could not be inspected." },
+      { id: "convert.build_pdf_pipeline_options", name: "build_pdf_pipeline_options(do_ocr)", kind: "func", sig: "def build_pdf_pipeline_options(do_ocr: bool) -> PdfPipelineOptions", ext: "docling PdfPipelineOptions", desc: "do_ocr as given, do_table_structure True, generate_page_images False. Turning OCR off does not turn off layout analysis." },
+      { id: "convert.__get_converter", name: "_get_converter(do_ocr)", kind: "func", sig: "@lru_cache(maxsize=2)  def _get_converter(do_ocr: bool) -> DocumentConverter", ext: "docling DocumentConverter, PdfFormatOption", desc: "One DocumentConverter per OCR mode, kept for the life of the process because Docling caches loaded models on the converter." },
+      { id: "convert.__convert", name: "_convert(pdf_path, do_ocr, page_range=None)", kind: "func", sig: "def _convert(pdf_path, do_ocr, page_range=None)", ext: "converter.convert()", desc: "Runs the cached converter, optionally on a 1-based inclusive page range. Logs failures with the OCR mode and re-raises." },
+      { id: "convert.__ocr_runs", name: "_ocr_runs(page_ocr)", kind: "func", sig: "def _ocr_runs(page_ocr) -> list[(do_ocr, first, last)]", ext: "itertools.groupby", desc: "Groups consecutive pages with the same OCR decision into runs." },
+      { id: "convert.__convert_by_page", name: "_convert_by_page(pdf_path, page_ocr)", kind: "func", sig: "def _convert_by_page(pdf_path, page_ocr) -> DoclingDocument", ext: "DoclingDocument.concatenate", desc: "Converts each run with its own OCR mode and merges the results. Checks each run finished SUCCESS with the right page count, restores origin and name that concatenate drops, and checks the merged pages equal the PDF's pages. Raises ValueError otherwise." },
+      { id: "convert.convert_pdf", name: "convert_pdf(pdf_path, routing=None)", kind: "func", sig: "def convert_pdf(pdf_path, routing=None) -> PdfConversion", desc: "Reads the routing mode (argument, then PDF_ROUTING, then \"document\"). Inspects the PDF. If inspection fails, converts the whole document with OCR. Otherwise builds page_ocr and either converts by page (mode page, mixed decisions, with whole-document OCR as fallback) or converts the whole document, with OCR if any page needs it." },
+      { id: "convert.convert_document", name: "convert_document(pdf_path)", kind: "func", sig: "def convert_document(pdf_path)", desc: "Returns convert_pdf(pdf_path).document. Kept for callers that want only the Docling document." }
+    ] },
+  { id: "detector", path: "app/ingestion/pdf_detector.py", layer: "det", note: "Lightweight per-page PDF classification with pypdf. No rendering, no OCR, no Docling.",
+    imports: "logging, dataclasses, pypdf.PdfReader",
+    items: [
+      { id: "detector.PageType", name: "PageType", kind: "alias", sig: "Literal[\"digital\", \"scanned\", \"ambiguous\"]", desc: "The three possible page classifications." },
+      { id: "detector.PdfDetectionError", name: "PdfDetectionError", kind: "class", sig: "class PdfDetectionError(Exception)", desc: "Raised when the PDF is empty, malformed, missing or encrypted with a non-empty password." },
+      { id: "detector.DetectorConfig", name: "DetectorConfig", kind: "class", sig: "@dataclass(frozen=True)", desc: "Thresholds: min_digital_chars 100, max_scanned_chars 10, large_image_pixels 250,000, max_pages None (inspect every page)." },
+      { id: "detector.PageResult", name: "PageResult", kind: "class", sig: "@dataclass(frozen=True)", desc: "Per-page result: 0-based index, page_type, char_count, image_count, large_image_count and a human-readable reason." },
+      { id: "detector.PdfInspection", name: "PdfInspection", kind: "class", sig: "@dataclass(frozen=True)  page_count · pages", desc: "Page count plus the list of PageResult objects, with helpers below." },
+      { id: "detector.PdfInspection.sampled", name: ".sampled", kind: "prop", sig: "@property  -> bool", desc: "True if fewer pages were inspected than the PDF has." },
+      { id: "detector.PdfInspection.count", name: ".count(page_type)", kind: "method", sig: "def count(self, page_type) -> int", desc: "Number of inspected pages of one type. Used for the log line." },
+      { id: "detector.PdfInspection.digital_ratio", name: ".digital_ratio", kind: "prop", sig: "@property  -> float", desc: "Share of inspected pages that are digital." },
+      { id: "detector.PdfInspection.all_digital", name: ".all_digital", kind: "prop", sig: "@property  -> bool", desc: "True if every inspected page is digital." },
+      { id: "detector._sample_indices", name: "_sample_indices(page_count, max_pages)", kind: "func", sig: "def _sample_indices(page_count, max_pages) -> list[int]", desc: "All page indices, or max_pages evenly spaced ones when the PDF is larger than max_pages." },
+      { id: "detector._image_stats", name: "_image_stats(page, large_image_pixels)", kind: "func", sig: "def _image_stats(page, large_image_pixels) -> (total, large)", ext: "pypdf page /Resources /XObject", desc: "Counts image XObjects in the page's resource dictionary from their Width and Height, without decoding them. Images nested in form XObjects and inline images are not seen." },
+      { id: "detector._classify_page", name: "_classify_page(index, page, config)", kind: "func", sig: "def _classify_page(index, page, config) -> PageResult", ext: "pypdf page.extract_text()", desc: "Applies the thresholds to one page (see the decision tree). Any exception while inspecting the page yields an ambiguous result instead of aborting the whole inspection." },
+      { id: "detector._classify_page.result", name: "result(page_type, reason)", kind: "inner", sig: "nested in _classify_page", desc: "Builds the PageResult from the already-computed counts." },
+      { id: "detector.inspect_pdf", name: "inspect_pdf(pdf_path, config=None)", kind: "func", sig: "def inspect_pdf(pdf_path, config=None) -> PdfInspection", ext: "pypdf PdfReader", desc: "Opens the PDF, tries an empty password if encrypted, classifies the chosen pages and logs the counts. Wraps every failure in PdfDetectionError." }
+    ] },
+  { id: "registry", path: "app/db/registry.py", layer: "db", note: "All SQLite access. One short-lived connection per call.",
+    imports: "sqlite3, pathlib",
+    items: [
+      { id: "registry.DB_PATH", name: "DB_PATH", kind: "const", sig: "app/storage/documents.db", desc: "SQLite database file." },
+      { id: "registry.FAILED_STATUS", name: "FAILED_STATUS", kind: "const", sig: "\"failed\"", desc: "Rows with this status do not count as duplicates." },
+      { id: "registry.get_connection", name: "get_connection()", kind: "func", sig: "def get_connection() -> sqlite3.Connection", desc: "Creates the storage folder, opens the database with a 30 s timeout and returns rows as sqlite3.Row." },
+      { id: "registry.init_db", name: "init_db()", kind: "func", sig: "def init_db() -> None", desc: "Creates documents and document_pages if missing, adds content_hash to an older documents table, and creates idx_documents_content_hash. Safe to run repeatedly." },
+      { id: "registry.create_document", name: "create_document(document_id, filename, file_path)", kind: "func", sig: "def create_document(document_id, filename, file_path)", desc: "Plain insert with status uploaded and no hash. Replaced by register_upload." },
+      { id: "registry.register_upload", name: "register_upload(document_id, filename, file_path, content_hash)", kind: "func", sig: "def register_upload(...) -> dict | None", desc: "In one BEGIN IMMEDIATE transaction: looks for a row with the same hash whose status is not failed. If found, returns it and inserts nothing. Otherwise inserts the new row and returns None." },
+      { id: "registry.save_pages", name: "save_pages(document_id, pages)", kind: "func", sig: "def save_pages(document_id, pages)", desc: "Deletes the document's page rows and inserts the new ones in one transaction, so a retried job does not duplicate rows." },
+      { id: "registry.get_pages", name: "get_pages(document_id)", kind: "func", sig: "def get_pages(document_id) -> list[dict]", desc: "Page rows ordered by page_no." },
+      { id: "registry.update_status", name: "update_status(document_id, status, job_id=None, error=None)", kind: "func", sig: "def update_status(document_id, status, job_id=None, error=None)", desc: "Sets the status. job_id is kept if None is passed; error is always overwritten, so omitting it clears it." },
+      { id: "registry.get_document", name: "get_document(document_id)", kind: "func", sig: "def get_document(document_id) -> dict | None", desc: "The documents row, or None." },
+      { id: "registry.set_job_id", name: "set_job_id(document_id, job_id)", kind: "func", sig: "def set_job_id(document_id, job_id)", desc: "Stores the RQ job id on the row." }
+    ] },
+  { id: "stubs", path: "chunk.py · embed.py · pipeline.py · db/qdrant.py · core/config.py", layer: "ext", note: "Five empty files. They mark where chunking, embeddings, orchestration, the vector store and configuration will go.",
+    imports: "nothing",
+    items: [] }
+];
+
+/* caller → callee; type: call (default), enqueue, lazy, build, raise, catch */
+const EDGES = [
+  ["main.startup", "registry.init_db"],
+  ["routes.upload_document", "registry.register_upload"],
+  ["routes.upload_document", "registry.update_status"],
+  ["routes.upload_document", "registry.set_job_id"],
+  ["routes.upload_document", "worker.process_document", "enqueue"],
+  ["routes.document_status", "registry.get_document"],
+  ["routes.document_pages", "registry.get_document"],
+  ["routes.document_pages", "registry.get_pages"],
+  ["worker.process_document", "registry.update_status"],
+  ["worker.process_document", "registry.save_pages"],
+  ["worker.process_document", "convert.convert_pdf", "lazy"],
+  ["worker.process_document", "convert.PdfConversion.page_records"],
+  ["convert.convert_document", "convert.convert_pdf"],
+  ["convert.convert_pdf", "detector.inspect_pdf"],
+  ["convert.convert_pdf", "convert.__convert"],
+  ["convert.convert_pdf", "convert.__convert_by_page"],
+  ["convert.convert_pdf", "convert.PdfConversion", "build"],
+  ["convert.convert_pdf", "detector.PdfDetectionError", "catch"],
+  ["convert.__convert", "convert.__get_converter"],
+  ["convert.__get_converter", "convert.build_pdf_pipeline_options"],
+  ["convert.__convert_by_page", "convert.__ocr_runs"],
+  ["convert.__convert_by_page", "convert.__convert"],
+  ["detector.inspect_pdf", "detector.__sample_indices"],
+  ["detector.inspect_pdf", "detector.__classify_page"],
+  ["detector.inspect_pdf", "detector.PdfInspection", "build"],
+  ["detector.inspect_pdf", "detector.PdfDetectionError", "raise"],
+  ["detector.inspect_pdf", "detector.DetectorConfig", "build"],
+  ["detector.inspect_pdf", "detector.PdfInspection.count"],
+  ["detector.__classify_page", "detector.__image_stats"],
+  ["detector.__classify_page", "detector.PageResult", "build"],
+  ["detector.PdfInspection.all_digital", "detector.PdfInspection.count"],
+  ["detector.PdfInspection.digital_ratio", "detector.PdfInspection.count"],
+  ...["init_db", "create_document", "register_upload", "update_status", "set_job_id", "get_document", "get_pages", "save_pages"].map(n => ["registry." + n, "registry.get_connection"])
+].map(([from, to, type]) => ({ from: fix(from), to: fix(to), type: type || "call" }));
+
+/* ids in EDGES use "__x" for private names to keep them distinct from item ids; map them back */
+function fix(id) { return id.replace(".__", "._"); }
+FILES.forEach(f => f.items.forEach(it => { it.id = fix(it.id); }));
+
+const ITEM = {};
+FILES.forEach(f => f.items.forEach(it => { it.file = f; ITEM[it.id] = it; }));
+const callsOf = id => EDGES.filter(e => e.from === id).map(e => e.to);
+const callersOf = id => EDGES.filter(e => e.to === id).map(e => e.from);
+const UNUSED = new Set(["registry.create_document", "convert.convert_document", "detector.PdfInspection.sampled", "detector.PdfInspection.digital_ratio", "detector.PdfInspection.all_digital"]);
+
+/* ---------- 7. call graph ---------- */
+(function () {
+  const COLS = [
+    { file: "main", ids: ["main.startup", "main.health"] },
+    { file: "routes", ids: ["routes.upload_document", "routes.document_status", "routes.document_pages"] },
+    { file: "worker", ids: ["worker.process_document"] },
+    { file: "convert", ids: ["convert.convert_document", "convert.convert_pdf", "convert.PdfConversion", "convert.PdfConversion.page_records", "convert._convert", "convert._convert_by_page", "convert._ocr_runs", "convert._get_converter", "convert.build_pdf_pipeline_options"] },
+    { file: "detector", ids: ["detector.inspect_pdf", "detector._classify_page", "detector._image_stats", "detector._sample_indices", "detector.DetectorConfig", "detector.PageResult", "detector.PdfInspection", "detector.PdfInspection.count", "detector.PdfInspection.all_digital", "detector.PdfInspection.digital_ratio", "detector.PdfInspection.sampled", "detector.PdfDetectionError"] }
+  ];
+  const REG = ["init_db", "create_document", "register_upload", "update_status", "set_job_id", "get_document", "get_pages", "save_pages"].map(n => "registry." + n);
+  const colX = i => 30 + i * 285, NW = 230, NH = 32, ROW = 44, TOP = 76;
+  const REG_Y = 700, REG_W = 150, REG_STEP = 165, BUS = 650;
+  const pos = {};
+  COLS.forEach((c, ci) => c.ids.forEach((id, r) => { pos[id] = { x: colX(ci), y: TOP + r * ROW, w: NW, h: NH, col: ci }; }));
+  REG.forEach((id, i) => { pos[id] = { x: 30 + i * REG_STEP, y: REG_Y, w: REG_W, h: NH, col: -1 }; });
+  const totalRegW = 7 * REG_STEP + REG_W;
+  pos["registry.get_connection"] = { x: 30 + totalRegW / 2 - 80, y: REG_Y + 62, w: 160, h: NH, col: -1 };
+  const W = 1420, H = 830;
+  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Call graph of every function and class in app/. Hover or focus a node to highlight its callers and callees." style="min-width:1150px"><defs><marker id="cgm" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>`;
+  const layerOf = id => "L-" + ITEM[id].file.layer;
+  COLS.forEach((c, ci) => {
+    const f = FILES.find(x => x.id === c.file);
+    const h = TOP + c.ids.length * ROW - 40;
+    svg += `<g class="L-${f.layer}"><rect class="band" x="${colX(ci) - 10}" y="40" width="${NW + 20}" height="${h + 6}" rx="8"/><text class="bandlabel" x="${colX(ci)}" y="62">${esc(f.path.replace("app/", ""))}</text></g>`;
+  });
+  svg += `<g class="L-db"><rect class="band" x="20" y="${REG_Y - 36}" width="${totalRegW + 20}" height="${REG_Y + 62 + NH + 14 - (REG_Y - 36)}" rx="8"/><text class="bandlabel" x="32" y="${REG_Y + 62 + NH + 4}">db/registry.py</text></g>`;
+
+  /* edges */
+  const gutterCount = {}, sameCount = {}, adjCount = {};
+  let edgeSvg = "";
+  EDGES.forEach(e => {
+    const a = pos[e.from], b = pos[e.to];
+    let pts;
+    if (b.col === -1 && a.col === -1) {
+      const bx = a.x + a.w / 2, gx = b.x + b.w / 2, y1 = a.y + a.h, yb = REG_Y + 50;
+      pts = [[bx, y1], [bx, yb], [gx, yb], [gx, b.y]];
+    } else if (b.col === -1) {
+      const k = (gutterCount[a.col] = (gutterCount[a.col] || 0) + 1) - 1;
+      const gx = a.x - 12 - k * 5;
+      pts = [[a.x, a.y + a.h / 2], [gx, a.y + a.h / 2], [gx, BUS - (a.col % 3) * 6], [b.x + b.w / 2 + ((k % 3) - 1) * 12, BUS - (a.col % 3) * 6], [b.x + b.w / 2 + ((k % 3) - 1) * 12, b.y]];
+    } else if (a.col === b.col) {
+      const k = (sameCount[a.col] = (sameCount[a.col] || 0) + 1) - 1;
+      const bx = a.x + a.w + 14 + (k % 6) * 5;
+      pts = [[a.x + a.w, a.y + a.h / 2], [bx, a.y + a.h / 2], [bx, b.y + b.h / 2], [b.x + b.w, b.y + b.h / 2]];
+    } else {
+      const k = (adjCount[a.col] = (adjCount[a.col] || 0) + 1) - 1;
+      const mx = a.x + a.w + 10 + (k % 6) * 7;
+      pts = [[a.x + a.w, a.y + a.h / 2], [mx, a.y + a.h / 2], [mx, b.y + b.h / 2], [b.x, b.y + b.h / 2]];
+    }
+    const d = pts.map((p, i) => (i ? "L" : "M") + p[0] + " " + p[1]).join(" ");
+    const cls = e.type === "enqueue" || e.type === "lazy" ? "dash" : e.type === "build" || e.type === "raise" || e.type === "catch" ? "dot" : "";
+    edgeSvg += `<path class="edge ${cls}" data-from="${e.from}" data-to="${e.to}" d="${d}" marker-end="url(#cgm)"/>`;
+  });
+  svg += edgeSvg;
+
+  /* nodes */
+  Object.keys(pos).forEach(id => {
+    const p = pos[id], it = ITEM[id];
+    const kindLabel = { func: "fn", class: "class", method: "method", prop: "prop" }[it.kind] || it.kind;
+    const label = it.name.replace(/\(.*\)$/, "()");
+    svg += `<g class="node ${layerOf(id)}${UNUSED.has(id) ? " unused" : ""}" data-id="${id}" tabindex="0" role="button" aria-label="${esc(it.name)} in ${esc(it.file.path)}"><rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="5"/><text x="${p.x + 8}" y="${p.y + p.h / 2 + 4}">${esc(label)}</text>${label.length <= 21 ? `<text class="kind" x="${p.x + p.w - 6}" y="${p.y + p.h / 2 + 3.5}" text-anchor="end">${kindLabel}</text>` : ""}</g>`;
+  });
+  svg += "</svg>";
+  const host = document.getElementById("fig-callgraph");
+  host.innerHTML = svg;
+
+  /* interaction */
+  const root = host.querySelector("svg");
+  const info = document.getElementById("cg-info");
+  let pinned = null;
+  const nodeEl = {}; host.querySelectorAll(".node").forEach(n => { nodeEl[n.dataset.id] = n; });
+  const edgeEls = Array.from(host.querySelectorAll(".edge"));
+
+  function chip(id) { return `<button class="chip" data-jump="${id}">${esc(ITEM[id].name)}</button>`; }
+  function show(id) {
+    const it = ITEM[id];
+    const calls = callsOf(id), by = callersOf(id);
+    info.innerHTML = `<h3>${esc(it.name)}</h3><div class="meta">${esc(it.file.path)} · ${esc(it.kind)}${UNUSED.has(id) ? " · no caller inside app/" : ""}</div><p>${esc(it.desc)}</p>` +
+      `<div class="chips"><span>calls</span>${calls.length ? calls.map(chip).join("") : "<span>nothing in app/</span>"}</div>` +
+      `<div class="chips"><span>called by</span>${by.length ? by.map(chip).join("") : "<span>nothing in app/</span>"}</div>`;
+  }
+  function clear() {
+    root.parentElement.classList.remove("sel");
+    host.classList.remove("sel");
+    host.querySelectorAll(".on").forEach(n => n.classList.remove("on"));
+    info.innerHTML = `<p style="color:var(--muted);margin:0">Hover or focus a node to see what it calls and what calls it. Click to pin it.</p>`;
+  }
+  function select(id) {
+    host.classList.add("sel");
+    host.querySelectorAll(".on").forEach(n => n.classList.remove("on"));
+    const rel = new Set([id, ...callsOf(id), ...callersOf(id)]);
+    rel.forEach(r => nodeEl[r] && nodeEl[r].classList.add("on"));
+    edgeEls.forEach(e => { if (e.dataset.from === id || e.dataset.to === id) e.classList.add("on"); });
+    show(id);
+  }
+  Object.keys(nodeEl).forEach(id => {
+    const n = nodeEl[id];
+    n.addEventListener("mouseenter", () => { if (!pinned) select(id); });
+    n.addEventListener("mouseleave", () => { if (!pinned) clear(); });
+    n.addEventListener("focus", () => { if (!pinned) select(id); });
+    n.addEventListener("click", ev => {
+      ev.stopPropagation();
+      host.querySelectorAll(".pin").forEach(x => x.classList.remove("pin"));
+      if (pinned === id) { pinned = null; clear(); return; }
+      pinned = id; n.classList.add("pin"); select(id);
+    });
+    n.addEventListener("keydown", ev => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); n.dispatchEvent(new MouseEvent("click", { bubbles: true })); } });
+  });
+  root.addEventListener("click", () => { pinned = null; host.querySelectorAll(".pin").forEach(x => x.classList.remove("pin")); clear(); });
+  document.addEventListener("keydown", ev => { if (ev.key === "Escape" && pinned) { pinned = null; host.querySelectorAll(".pin").forEach(x => x.classList.remove("pin")); clear(); } });
+  info.addEventListener("click", ev => {
+    const j = ev.target.closest("[data-jump]");
+    if (!j) return;
+    pinned = j.dataset.jump; host.querySelectorAll(".pin").forEach(x => x.classList.remove("pin"));
+    nodeEl[pinned].classList.add("pin"); select(pinned);
+  });
+  clear();
+})();
+
+/* ---------- 8. file reference ---------- */
+(function () {
+  const host = document.getElementById("ref");
+  const chip = id => `<a class="chip" href="#it-${id}" data-ref="${id}">${esc(ITEM[id].name)}</a>`;
+  host.innerHTML = FILES.map(f => {
+    const items = f.items.map(it => {
+      const calls = callsOf(it.id), by = callersOf(it.id);
+      const rel = [];
+      if (calls.length) rel.push(`<div class="rel"><span>calls</span>${calls.map(chip).join("")}</div>`);
+      if (by.length) rel.push(`<div class="rel"><span>called by</span>${by.map(chip).join("")}</div>`);
+      if (it.ext) rel.push(`<div class="rel"><span>uses</span><span class="mono">${esc(it.ext)}</span></div>`);
+      return `<div class="item L-${f.layer}${it.kind === "inner" ? " inner" : ""}" id="it-${it.id}">
+        <div class="head"><span class="nm">${esc(it.name)}</span><span class="badge">${esc(it.kind)}</span>${UNUSED.has(it.id) ? '<span class="badge warn">no caller in app/</span>' : ""}</div>
+        <div class="sig">${esc(it.sig)}</div><p>${esc(it.desc)}</p>${rel.join("")}</div>`;
+    }).join("");
+    return `<details class="file L-${f.layer}" open><summary><span class="fpath">${esc(f.path)}</span><span class="fnote">${esc(f.note)}</span></summary>
+      <div class="item L-${f.layer}" style="border-top:0;padding-bottom:4px"><div class="sig">imports: ${esc(f.imports)}</div></div>
+      <div class="items">${items}</div></details>`;
+  }).join("");
+  host.addEventListener("click", ev => {
+    const a = ev.target.closest("[data-ref]");
+    if (!a) return;
+    ev.preventDefault();
+    const el = document.getElementById("it-" + a.dataset.ref);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.classList.add("flash");
+    setTimeout(() => el.classList.remove("flash"), 1400);
+  });
+})();
+</script>
+
+</body>
+</html>
