@@ -47,9 +47,20 @@ def init_db():
                 large_image_count INTEGER NOT NULL,
                 ocr_used INTEGER NOT NULL,
                 reason TEXT NOT NULL,
+                extracted_chars INTEGER,
+                low_yield INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (document_id, page_no)
             )
         """)
+
+        # Databases created before low-yield flagging lack these columns.
+        page_columns = {row["name"] for row in conn.execute("PRAGMA table_info(document_pages)")}
+        if "extracted_chars" not in page_columns:
+            conn.execute("ALTER TABLE document_pages ADD COLUMN extracted_chars INTEGER")
+        if "low_yield" not in page_columns:
+            conn.execute(
+                "ALTER TABLE document_pages ADD COLUMN low_yield INTEGER NOT NULL DEFAULT 0"
+            )
 
 #insert a new document into the database.
 def create_document(document_id, filename, file_path):
@@ -116,11 +127,14 @@ def save_pages(document_id, pages):
             """
             INSERT INTO document_pages
                 (document_id, page_no, page_type, char_count, image_count,
-                 large_image_count, ocr_used, reason)
+                 large_image_count, ocr_used, reason, extracted_chars, low_yield)
             VALUES (:document_id, :page_no, :page_type, :char_count, :image_count,
-                    :large_image_count, :ocr_used, :reason)
+                    :large_image_count, :ocr_used, :reason, :extracted_chars, :low_yield)
             """,
-            [{"document_id": document_id, **page} for page in pages],
+            [
+                {"extracted_chars": None, "low_yield": 0, **page, "document_id": document_id}
+                for page in pages
+            ],
         )
 
 

@@ -45,10 +45,16 @@ class ConvertTestCase(unittest.TestCase):
 
 
 class ConvertRoutingTests(ConvertTestCase):
-    """Real detector, mocked Docling: checks which options reach the converter."""
+    """Real detector, mocked Docling: checks which options reach the converter.
+
+    These tests describe document routing, which is no longer the default.
+    """
 
     def setUp(self):
         super().setUp()
+        patcher = patch.dict("os.environ", {"PDF_ROUTING": "document"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
         patchers = {
             name: patch.object(convert, name)
             for name in ("PdfPipelineOptions", "PdfFormatOption", "DocumentConverter")
@@ -154,6 +160,10 @@ class ConvertPageRoutingTests(ConvertTestCase):
         self.mocks = [p.start() for p in patchers]
         for p in patchers:
             self.addCleanup(p.stop)
+        # These tests use short PDFs where most pages need OCR.
+        patcher = patch.object(convert, "MAX_OCR_FRACTION", 1.0)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.docling_document = self.mocks[1]
         self.docling_document.concatenate.return_value = self.merged
         self.merged.pages = {}
@@ -218,14 +228,108 @@ class ConvertPageRoutingTests(ConvertTestCase):
         self.assertEqual(self.calls[-1], (True, None))
         self.assertEqual(conversion.routing, "document")
 
-    def test_routing_defaults_to_document_and_reads_environment(self):
+    def test_mostly_ocr_pdf_falls_back_to_document_routing(self):
+        with patch.object(convert, "MAX_OCR_FRACTION", 0.25):
+            conversion = self.convert([DIGITAL, SCANNED, SCANNED, DIGITAL])
+
+        self.assertEqual(conversion.routing, "document")
+        self.assertEqual(self.calls, [(True, None)])
+        self.assertEqual(set(conversion.page_ocr.values()), {True})
+
+    def test_mostly_digital_pdf_keeps_page_routing(self):
+        with patch.object(convert, "MAX_OCR_FRACTION", 0.25):
+            conversion = self.convert([DIGITAL] * 7 + [SCANNED])
+
+        self.assertEqual(conversion.routing, "page")
+
+    def test_routing_defaults_to_page_and_reads_environment(self):
         self.total_pages = 2
         pdf = self.make_pdf([DIGITAL, SCANNED])
-        self.assertEqual(convert.convert_pdf(pdf).routing, "document")
-
         self.merged.pages = {1: object(), 2: object()}
-        with patch.dict("os.environ", {"PDF_ROUTING": "page"}):
+
+        with patch.dict("os.environ", clear=False) as env:
+            env.pop("PDF_ROUTING", None)
             self.assertEqual(convert.convert_pdf(pdf).routing, "page")
+
+        with patch.dict("os.environ", {"PDF_ROUTING": "document"}):
+            self.assertEqual(convert.convert_pdf(pdf).routing, "document")
+
+
+class BridgeShortGapsTests(unittest.TestCase):
+    @staticmethod
+    def pages(pattern):
+        return {n: ch == "o" for n, ch in enumerate(pattern, 1)}
+
+    def bridge(self, pattern, max_gap):
+        result = convert._bridge_short_gaps(self.pages(pattern), max_gap)
+        return "".join("o" if result[n] else "d" for n in sorted(result))
+
+    def test_short_gap_between_ocr_runs_is_filled(self):
+        self.assertEqual(self.bridge("oddo", 2), "oooo")
+
+    def test_gap_longer_than_the_limit_is_kept(self):
+        self.assertEqual(self.bridge("odddo", 2), "odddo")
+
+    def test_leading_and_trailing_digital_pages_are_not_ocrd(self):
+        self.assertEqual(self.bridge("ddodd", 5), "ddodd")
+
+    def test_all_digital_and_all_ocr_are_unchanged(self):
+        self.assertEqual(self.bridge("dddd", 5), "dddd")
+        self.assertEqual(self.bridge("oooo", 5), "oooo")
+
+    def test_several_gaps_merge_into_one_run(self):
+        bridged = self.bridge("ododdo", 2)
+        self.assertEqual(bridged, "oooooo")
+        self.assertEqual(len(convert._ocr_runs(self.pages(bridged))), 1)
+
+
+class ExtractedCharsTests(unittest.TestCase):
+    @staticmethod
+    def prov(page_no):
+        return [SimpleNamespace(page_no=page_no)]
+
+    def document(self):
+        text = lambda t, page, parent=None: SimpleNamespace(
+            text=t, prov=self.prov(page), parent=parent and SimpleNamespace(cref=parent)
+        )
+        cell = lambda t: SimpleNamespace(text=t)
+        return SimpleNamespace(
+            texts=[
+                text("a" * 60, 1),
+                text("  b  ", 2),
+                text("c" * 10, 2),
+                # Chart labels nested under a picture are never chunked.
+                text("d" * 200, 2, parent="#/pictures/0"),
+                text("e" * 20, 4, parent="#/groups/0"),
+            ],
+            tables=[
+                SimpleNamespace(
+                    prov=self.prov(3),
+                    data=SimpleNamespace(table_cells=[cell("x" * 40), cell("y" * 30)]),
+                )
+            ],
+        )
+
+    def test_counts_indexable_text_and_table_cells_per_page(self):
+        self.assertEqual(
+            convert.extracted_chars_by_page(self.document()), {1: 60, 2: 11, 3: 70, 4: 20}
+        )
+
+    def test_page_records_flag_low_yield_pages(self):
+        pages = [
+            SimpleNamespace(index=i, page_type="digital", char_count=1, image_count=0,
+                            large_image_count=0, reason="r")
+            for i in range(4)
+        ]
+        conversion = convert.PdfConversion(
+            self.document(), "page", {n: False for n in range(1, 5)},
+            SimpleNamespace(pages=pages),
+        )
+
+        records = conversion.page_records()
+
+        self.assertEqual([r["extracted_chars"] for r in records], [60, 11, 70, 20])
+        self.assertEqual([r["low_yield"] for r in records], [0, 1, 0, 1])
 
 
 @unittest.skipUnless(DOCLING_INSTALLED, "docling is not installed")

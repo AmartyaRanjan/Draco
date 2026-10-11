@@ -1,7 +1,97 @@
 # Changelog: PDF detection and Docling conversion stage
 
-Newest entry first. Iterations 1 and 2 were limited to `app/ingestion/pdf_detector.py`,
+Newest entry first. Iterations 4 and 5 touch the ingestion pipeline, the stores, the registry and their tests. Iterations 1 and 2 were limited to `app/ingestion/pdf_detector.py`,
 `app/ingestion/convert.py` and `tests/`; Iteration 3 also touches the registry, upload route and worker.
+
+---
+
+## Iteration 5: OCR routing default, small chunks and low-yield pages (2026-10-11)
+
+Follows up the "Found, not changed" list from Iteration 4. Measured on the real PDFs, ingested through the worker path against throwaway stores.
+
+### 1. Page routing is now the default, with two guards
+
+**Problem:** with document routing, one page that is not clearly digital turned OCR on for every page. The detector itself was right (534 of 548 pages of one book have a text layer), but the 548-page book spent 317 s converting and the 673-page book 381 s, almost all of it OCR.
+
+**Changed:** `PDF_ROUTING` now defaults to `page` (`DEFAULT_ROUTING` in `convert.py`). On the 548-page book, conversion fell from 317 s to 120 s with the same 1,012 chunks.
+
+**Found when testing the 673-page book:** page routing made it slower, not faster. Its 116 scattered OCR pages split the PDF into 171 separate Docling runs, and each run has a fixed cost: 520 s of conversion against 381 s for document routing. Two guards fix this:
+- **Gap bridging** (`_bridge_short_gaps`, `PDF_ROUTING_MAX_BRIDGED_PAGES`, default 5): a stretch of 5 or fewer digital pages between two OCR runs is OCR'd as well, so the runs merge. This cut the 673-page book from 171 runs to 57 and from 520 s to 419 s of conversion, but that was still about 10% slower than document routing.
+- **OCR fraction limit** (`PDF_ROUTING_MAX_OCR_FRACTION`, default 0.25): if more than a quarter of the pages need OCR after bridging, the whole document is converted with OCR as before. The 673-page book (36%) now takes that path. **The 25% threshold is a judgement.** It lies between the two measurements (4% was 2.6x faster, 36% was about 10% slower), and nothing in between was measured.
+- A 5-page gap is an estimate from the two books' timings, not a tuned value.
+
+The 673-page book was not re-run with the final fraction limit. It now takes the same document-routing path as the Iteration 4 run (423 s).
+
+Recorded `ocr_used` per page now reflects bridged pages, so it matches what was actually OCR'd.
+
+### 2. Tiny chunks are merged into the previous chunk
+
+**Problem:** slide-style PDFs produced fragments such as `Side by side boxplot` / `X` (25 characters) and chunks holding only `<!-- formula-not-decoded -->`. They are noise for retrieval.
+
+**Changed:** `merge_small_chunks()` in `chunk.py` folds any chunk with fewer than 50 characters of real text (`INGESTION_MIN_CHUNK_CHARS`) into the previous chunk, extending its page range.
+- Docling's `formula-not-decoded` placeholders are removed from the text that is added, so a chunk of only placeholders adds nothing but its page number.
+- A small chunk at the very start joins the next chunk instead.
+- A merge that would exceed 512 tokens is skipped and the small chunk stays on its own, because the embedder truncates longer text and the tail would silently become unsearchable.
+- Chunk IDs are computed after merging, so they stay stable for the same content.
+
+The slide PDF went from 14 chunks to 10, none under 50 characters. A chunk with a placeholder alongside real text keeps it; only added text is cleaned.
+
+### 3. Low-yield pages are flagged
+
+**Problem:** nothing showed which pages contributed nothing to the index, so a document could finish as `completed` with several pages missing.
+
+**Added**
+- `document_pages.extracted_chars` and `low_yield` (in-place migration for existing databases). A page is low-yield when fewer than 50 characters (`PAGE_LOW_YIELD_CHARS`) of indexable text were extracted. They appear in `GET /documents/{id}/pages`, and the worker logs a warning listing them.
+- Only text that can reach the index is counted. Docling nests text found inside a chart or handwriting under the picture, and the chunker skips it. My first version counted it and flagged almost nothing: pages 8 and 10 of the slide PDF looked fine because of chart axis ticks, yet produced no chunks. Counting only non-picture text flags pages 1, 3, 7, 8, 10, 12, 16 and 17 of that PDF.
+- `extracted_chars` differs from `char_count`, which is the PDF's own text layer measured before conversion.
+
+Limits: a blank page is also flagged, and a page with a few real lines plus a large chart may not be. The flag says text is missing; it does not recover it. Reading charts and handwriting would need a vision model, which is not added.
+
+### Tests
+
+77 to 79 tests pass. New: `tests/test_chunk.py` (merge rules, token limit), gap bridging, the OCR-fraction fallback, per-page extracted text including picture-nested text, low-yield records, and the registry migration. The existing routing tests that described document routing now select it explicitly.
+
+---
+
+## Iteration 4: Ingestion pipeline test run and fixes (2026-10-11)
+
+The chunking, embedding, Qdrant and OpenSearch stages written since Iteration 3 were run end to end on real PDFs: 6 PDFs from 1 to 673 pages, through the real `process_document` path, against throwaway Qdrant and OpenSearch names and a temporary registry database (the real `rag_chunks` data and `documents.db` were not used). Every PDF finished with the same chunk count in Qdrant and OpenSearch. Conversion was 85% or more of the time on the large books: 548 pages took 367 s (317 s converting), 673 pages took 423 s (381 s converting); embedding and both store writes together were under 30 s.
+
+### 1. The pipeline could not be imported
+
+**Problem:** `pipeline.py`, `chunk.py` and `embed.py` imported `app.ingestion.schemas`, but the module is `app/ingestion/schema.py`. Every ingestion job would have failed with `ModuleNotFoundError` as soon as the worker reached the pipeline.
+
+**Fixed:** the three imports now use `app.ingestion.schema`.
+
+### 2. Re-ingesting a new version left the old chunks behind
+
+**Problem:** the chunk ID includes the document version, so a new version never overwrites the old one. Ingesting version 2 of a document that already had version 1 left both in both stores (13 chunks became 26), and search would return duplicates.
+
+**Added**
+- `delete_stale_versions(document_id, keep_version)` in `app/db/qdrant.py` (filter delete) and `app/db/opensearch.py` (`delete_by_query`, refreshed, `conflicts="proceed"`).
+- `ingest_converted_document()` calls both after every batch of the new version has been written.
+  **Why after, not before:** if a write fails part-way, the previous version stays searchable and the retry can still overwrite the new version's IDs. A test confirms nothing is deleted when a write fails, or when the document produces no chunks.
+- Re-ingesting the same version is unchanged: it writes the same IDs, so nothing is duplicated and the new cleanup deletes nothing. Checked against the real stores: versions 1, 1, 2 give 13, 13, 13 chunks.
+
+### 3. The tokenizer was reloaded for every document
+
+**Problem:** `iter_chunks()` called `build_chunker()` each time, which reloads the bge-m3 tokenizer from disk. It cost about 4.5 s per document, which was most of the time for small files (a 2-page PDF took 5.3 s, of which 0.2 s was embedding).
+
+**Changed:** `build_chunker()` is wrapped in `lru_cache(maxsize=1)`, so each worker process builds it once. The worker is single-threaded and the chunker holds no per-document state.
+
+### 4. Tests and dependencies
+
+**Fixed:** three tests in `tests/test_worker.py` were already failing, because the worker now checks that the file exists, rejects non-PDF files with `NotImplementedError`, and runs the ingestion pipeline. They now use real temporary files and a stubbed pipeline, and the non-PDF test expects a failed status instead of "completed". Added tests for a missing file and an ingestion failure.
+
+**Added:** `tests/test_pipeline.py` with Docling, the embedding model and both stores mocked. It covers batching, the delete-after-all-batches order, a failed write keeping the old version, an empty document, an embedding count mismatch, and the chunker being built once.
+
+**Added to `requirements.txt`:** `docling`, `fastapi`, `python-multipart`, `opensearch-py`, `qdrant-client`, `sentence-transformers`, `torch`, `pypdf` and `python-dotenv`, pinned to the versions the test run used. None were listed before, and Docling was not installed in `.venv`.
+
+### Found, not changed
+
+- **Slow OCR on large books:** all pages of both large books were routed to OCR, which is where almost all the time went. The detector thresholds in `pdf_detector.py` or `PDF_ROUTING=page` are worth testing.
+- **Lost content on slide-style PDFs:** "Analysis with Statistics" (17 pages) gave 14 chunks. Six pages produced none, one chunk is only `<!-- formula-not-decoded -->`, and several are under 50 characters. Image-only content such as plots is not captured.
+- **Redundant round trips:** `ensure_collection()` and `ensure_index()` run on every batch. The embedding batch size is 2 against a pipeline batch of 16. Neither is a bottleneck at the measured speeds.
 
 ---
 

@@ -69,6 +69,32 @@ class DuplicateTests(RegistryTestCase):
 
 
 class MigrationTests(unittest.TestCase):
+    def test_init_db_adds_low_yield_columns_to_existing_pages_table(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "documents.db"
+            with sqlite3.connect(db_path) as conn:
+                conn.execute(
+                    """
+                    CREATE TABLE document_pages (
+                        document_id TEXT NOT NULL, page_no INTEGER NOT NULL,
+                        page_type TEXT NOT NULL, char_count INTEGER NOT NULL,
+                        image_count INTEGER NOT NULL, large_image_count INTEGER NOT NULL,
+                        ocr_used INTEGER NOT NULL, reason TEXT NOT NULL,
+                        PRIMARY KEY (document_id, page_no))
+                    """
+                )
+                conn.execute(
+                    "INSERT INTO document_pages VALUES ('old', 1, 'digital', 5, 0, 0, 0, 'r')"
+                )
+
+            with patch.object(registry, "DB_PATH", db_path):
+                registry.init_db()
+                registry.init_db()  # idempotent
+                page = registry.get_pages("old")[0]
+
+        self.assertIsNone(page["extracted_chars"])
+        self.assertEqual(page["low_yield"], 0)
+
     def test_init_db_adds_content_hash_to_existing_database(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "documents.db"
@@ -113,6 +139,15 @@ class PageTests(RegistryTestCase):
         self.assertEqual([p["page_no"] for p in pages], [1, 2])
         self.assertEqual([p["page_type"] for p in pages], ["digital", "scanned"])
         self.assertEqual([p["ocr_used"] for p in pages], [0, 1])
+
+    def test_low_yield_fields_round_trip_and_default(self):
+        self.upload("a")
+        flagged = {**self.page(1), "extracted_chars": 12, "low_yield": 1}
+        registry.save_pages("a", [flagged, self.page(2)])
+
+        first, second = registry.get_pages("a")
+        self.assertEqual((first["extracted_chars"], first["low_yield"]), (12, 1))
+        self.assertEqual((second["extracted_chars"], second["low_yield"]), (None, 0))
 
     def test_saving_again_replaces_previous_pages(self):
         self.upload("a")

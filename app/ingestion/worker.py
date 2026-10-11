@@ -1,34 +1,82 @@
+
+import logging
 from pathlib import Path
 
-from app.db.registry import save_pages, update_status
+from app.db.registry import (
+    get_document,
+    save_pages,
+    update_status,
+)
+
+logger = logging.getLogger(__name__)
+
 
 def process_document(document_id: str, file_path: str):
-    update_status(document_id, "processing")
+    update_status(document_id, "processing", error=None)
 
     try:
+        path = Path(file_path)
+
+        if not path.is_file():
+            raise FileNotFoundError(
+                f"Uploaded file does not exist: {file_path}"
+            )
+
+        if path.suffix.lower() != ".pdf":
+            raise NotImplementedError(
+                f"Unsupported file format: {path.suffix}. "
+                "Only PDF ingestion is implemented currently."
+            )
+
         print(f"Processing document: {document_id}")
         print(f"File location: {file_path}")
 
-        if Path(file_path).suffix.lower() == ".pdf":
-            # Imported here so the API process, which imports this module to
-            # enqueue jobs, does not need to load Docling.
-            from app.ingestion.convert import convert_pdf
+        # Keep heavy conversion imports out of the API process.
+        from app.ingestion.convert import convert_pdf
 
-            conversion = convert_pdf(file_path)
-            save_pages(document_id, conversion.page_records())
-            # conversion.document is the Docling document for the next stage.
+        conversion = convert_pdf(file_path)
 
-        # TODO: Replace this with our real pipeline:
-        # 1. Docling conversion (done above for PDFs; other formats pending)
-        # 2. Chunking
-        # 3. Embedding generation
-        # 4. Qdrant storage
+        # Preserve the existing page-level audit records.
+        page_records = conversion.page_records()
+        save_pages(document_id, page_records)
 
-        update_status(document_id, "completed")
+        low_yield = [p["page_no"] for p in page_records if p.get("low_yield")]
+        if low_yield:
+            logger.warning(
+                "Document %s: %d page(s) yielded little text (likely images "
+                "or handwriting): %s",
+                document_id,
+                len(low_yield),
+                low_yield,
+            )
+
+        # Reuse the registered content hash as a version identifier
+        # when available, making retries deterministic.
+        document_record = get_document(document_id) or {}
+        document_version = (
+            document_record.get("content_hash") or "1"
+        )
+
+        from app.ingestion.pipeline import (
+            ingest_converted_document,
+        )
+
+        result = ingest_converted_document(
+            document_id=document_id,
+            document=conversion.document,
+            document_version=document_version,
+        )
+
+        update_status(
+            document_id,
+            "completed",
+            error=None,
+        )
 
         return {
             "document_id": document_id,
             "status": "completed",
+            "chunk_count": result["chunk_count"],
         }
 
     except Exception as exc:
