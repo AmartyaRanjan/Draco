@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 
+from app.api.query import router as query_router
 from app.api.routes import router
 from app.db.registry import init_db
 
@@ -10,6 +11,7 @@ app = FastAPI(
 )
 
 app.include_router(router)
+app.include_router(query_router)
 
 
 @app.on_event("startup")
