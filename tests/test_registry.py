@@ -2,6 +2,7 @@ import sqlite3
 import tempfile
 import threading
 import unittest
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
@@ -63,7 +64,7 @@ class DuplicateTests(RegistryTestCase):
             t.join()
 
         self.assertEqual(sum(r is None for r in results), 1)
-        with registry.get_connection() as conn:
+        with closing(registry.get_connection()) as conn:
             count = conn.execute("SELECT COUNT(*) FROM documents WHERE content_hash = 'h1'").fetchone()[0]
         self.assertEqual(count, 1)
 
@@ -72,9 +73,10 @@ class MigrationTests(unittest.TestCase):
     def test_init_db_adds_low_yield_columns_to_existing_pages_table(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "documents.db"
-            with sqlite3.connect(db_path) as conn:
-                conn.execute(
-                    """
+            with closing(sqlite3.connect(db_path)) as conn:
+                with conn:
+                    conn.execute(
+                        """
                     CREATE TABLE document_pages (
                         document_id TEXT NOT NULL, page_no INTEGER NOT NULL,
                         page_type TEXT NOT NULL, char_count INTEGER NOT NULL,
@@ -82,10 +84,10 @@ class MigrationTests(unittest.TestCase):
                         ocr_used INTEGER NOT NULL, reason TEXT NOT NULL,
                         PRIMARY KEY (document_id, page_no))
                     """
-                )
-                conn.execute(
-                    "INSERT INTO document_pages VALUES ('old', 1, 'digital', 5, 0, 0, 0, 'r')"
-                )
+                    )
+                    conn.execute(
+                        "INSERT INTO document_pages VALUES ('old', 1, 'digital', 5, 0, 0, 0, 'r')"
+                    )
 
             with patch.object(registry, "DB_PATH", db_path):
                 registry.init_db()
@@ -98,17 +100,18 @@ class MigrationTests(unittest.TestCase):
     def test_init_db_adds_content_hash_to_existing_database(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "documents.db"
-            with sqlite3.connect(db_path) as conn:
-                conn.execute(
-                    """
+            with closing(sqlite3.connect(db_path)) as conn:
+                with conn:
+                    conn.execute(
+                        """
                     CREATE TABLE documents (
                         document_id TEXT PRIMARY KEY, filename TEXT NOT NULL,
                         file_path TEXT NOT NULL, status TEXT NOT NULL,
                         job_id TEXT, error TEXT,
                         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)
                     """
-                )
-                conn.execute("INSERT INTO documents VALUES ('old', 'f.md', '/f.md', 'completed', NULL, NULL, 'now')")
+                    )
+                    conn.execute("INSERT INTO documents VALUES ('old', 'f.md', '/f.md', 'completed', NULL, NULL, 'now')")
 
             with patch.object(registry, "DB_PATH", db_path):
                 registry.init_db()

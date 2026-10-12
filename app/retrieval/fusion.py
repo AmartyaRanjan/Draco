@@ -33,12 +33,17 @@ def deduplicate(dense: list[Candidate], lexical: list[Candidate]) -> tuple[list[
 
 def rrf(candidates: list[Candidate], k: int = 60) -> list[Candidate]:
     """score = sum 1/(k+rank), one-based ranks; absent ranking contributes 0.
-    Ties break on best single-source rank, then chunk_id (deterministic)."""
+    Ties break on best single-source rank, then chunk_id (deterministic).
+    Candidates with neither rank score 0 and sort after any ranked peer."""
     for c in candidates:
         c.rrf_score = sum(1.0 / (k + r) for r in (c.dense_rank, c.bm25_rank) if r is not None)
     ordered = sorted(
         candidates,
-        key=lambda c: (-c.rrf_score, min(r for r in (c.dense_rank, c.bm25_rank) if r is not None), c.chunk_id),
+        key=lambda c: (
+            -c.rrf_score,
+            min((r for r in (c.dense_rank, c.bm25_rank) if r is not None), default=float("inf")),
+            c.chunk_id,
+        ),
     )
     for i, c in enumerate(ordered, 1):
         c.rrf_rank = i

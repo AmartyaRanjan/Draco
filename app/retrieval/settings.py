@@ -42,7 +42,8 @@ class RetrievalSettings:
 
     def validate(self) -> "RetrievalSettings":
         if min(self.dense_top_k, self.bm25_top_k, self.colbert_batch_size,
-               self.colbert_max_candidates, self.max_selected, self.llm_max_output_tokens) < 1:
+               self.colbert_max_candidates, self.colbert_max_length,
+               self.max_selected, self.llm_max_output_tokens) < 1:
             raise ValueError("Candidate counts, batch size and token limits must be >= 1.")
         if self.rrf_k < 1:
             raise ValueError("RETRIEVAL_RRF_K must be >= 1.")
