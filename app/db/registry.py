@@ -1,4 +1,5 @@
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 DB_PATH = Path(__file__).resolve().parents[1] / "storage" / "documents.db"
@@ -13,8 +14,13 @@ def get_connection():
 
 
 def init_db():
-    with get_connection() as conn:
-        conn.execute("""
+    # closing() is required: sqlite3.Connection as a context manager only
+    # commits/rolls back, it never closes. Without an explicit close the
+    # file handle survives until cyclic GC, which holds an exclusive lock
+    # on Windows and leaks descriptors in long-lived API/worker processes.
+    with closing(get_connection()) as conn:
+        with conn:
+            conn.execute("""
             CREATE TABLE IF NOT EXISTS documents (
                 document_id TEXT PRIMARY KEY,
                 filename TEXT NOT NULL,
@@ -27,17 +33,17 @@ def init_db():
             )
         """)
 
-        # Databases created before duplicate detection lack content_hash.
-        columns = {row["name"] for row in conn.execute("PRAGMA table_info(documents)")}
-        if "content_hash" not in columns:
-            conn.execute("ALTER TABLE documents ADD COLUMN content_hash TEXT")
+            # Databases created before duplicate detection lack content_hash.
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(documents)")}
+            if "content_hash" not in columns:
+                conn.execute("ALTER TABLE documents ADD COLUMN content_hash TEXT")
 
-        conn.execute("""
+            conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_documents_content_hash
             ON documents (content_hash)
         """)
 
-        conn.execute("""
+            conn.execute("""
             CREATE TABLE IF NOT EXISTS document_pages (
                 document_id TEXT NOT NULL,
                 page_no INTEGER NOT NULL,
@@ -53,19 +59,20 @@ def init_db():
             )
         """)
 
-        # Databases created before low-yield flagging lack these columns.
-        page_columns = {row["name"] for row in conn.execute("PRAGMA table_info(document_pages)")}
-        if "extracted_chars" not in page_columns:
-            conn.execute("ALTER TABLE document_pages ADD COLUMN extracted_chars INTEGER")
-        if "low_yield" not in page_columns:
-            conn.execute(
-                "ALTER TABLE document_pages ADD COLUMN low_yield INTEGER NOT NULL DEFAULT 0"
-            )
+            # Databases created before low-yield flagging lack these columns.
+            page_columns = {row["name"] for row in conn.execute("PRAGMA table_info(document_pages)")}
+            if "extracted_chars" not in page_columns:
+                conn.execute("ALTER TABLE document_pages ADD COLUMN extracted_chars INTEGER")
+            if "low_yield" not in page_columns:
+                conn.execute(
+                    "ALTER TABLE document_pages ADD COLUMN low_yield INTEGER NOT NULL DEFAULT 0"
+                )
 
 #insert a new document into the database.
 def create_document(document_id, filename, file_path):
-    with get_connection() as conn:
-        conn.execute("""
+    with closing(get_connection()) as conn:
+        with conn:
+            conn.execute("""
             INSERT INTO documents
                 (document_id, filename, file_path, status)
             VALUES (?, ?, ?, 'uploaded')
@@ -121,37 +128,38 @@ def save_pages(document_id, pages):
 
     pages: iterable of dicts with the document_pages columns except document_id.
     """
-    with get_connection() as conn:
-        conn.execute("DELETE FROM document_pages WHERE document_id = ?", (document_id,))
-        conn.executemany(
-            """
+    with closing(get_connection()) as conn:
+        with conn:
+            conn.execute("DELETE FROM document_pages WHERE document_id = ?", (document_id,))
+            conn.executemany(
+                """
             INSERT INTO document_pages
                 (document_id, page_no, page_type, char_count, image_count,
                  large_image_count, ocr_used, reason, extracted_chars, low_yield)
             VALUES (:document_id, :page_no, :page_type, :char_count, :image_count,
                     :large_image_count, :ocr_used, :reason, :extracted_chars, :low_yield)
             """,
-            [
-                {"extracted_chars": None, "low_yield": 0, **page, "document_id": document_id}
-                for page in pages
-            ],
-        )
+                [
+                    {"extracted_chars": None, "low_yield": 0, **page, "document_id": document_id}
+                    for page in pages
+                ],
+            )
 
 
 def get_pages(document_id):
-    with get_connection() as conn:
+    with closing(get_connection()) as conn:
         rows = conn.execute(
             "SELECT * FROM document_pages WHERE document_id = ? ORDER BY page_no",
             (document_id,),
         ).fetchall()
-
-    return [dict(row) for row in rows]
+        return [dict(row) for row in rows]
 
 
 #status of the document can be 'uploaded', 'processing', 'processed', 'error'
 def update_status(document_id, status, job_id=None, error=None):
-    with get_connection() as conn:
-        conn.execute("""
+    with closing(get_connection()) as conn:
+        with conn:
+            conn.execute("""
             UPDATE documents
             SET status = ?,
                 job_id = COALESCE(?, job_id),
@@ -161,18 +169,18 @@ def update_status(document_id, status, job_id=None, error=None):
 
 #retrieve document by id
 def get_document(document_id):
-    with get_connection() as conn:
+    with closing(get_connection()) as conn:
         row = conn.execute(
             "SELECT * FROM documents WHERE document_id = ?",
             (document_id,),
         ).fetchone()
-
-    return dict(row) if row else None
+        return dict(row) if row else None
 
 #for saving the RQ id of the job associated with a document in the database. This allows us to track which RQ job is processing which document.
 def set_job_id(document_id, job_id):
-    with get_connection() as conn:
-        conn.execute(
-            "UPDATE documents SET job_id = ? WHERE document_id = ?",
-            (job_id, document_id),
-        )
+    with closing(get_connection()) as conn:
+        with conn:
+            conn.execute(
+                "UPDATE documents SET job_id = ? WHERE document_id = ?",
+                (job_id, document_id),
+            )
