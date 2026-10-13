@@ -47,6 +47,8 @@ class InferenceSettings:
             raise ValueError("INFERENCE_BASE_URL and INFERENCE_MODEL are required.")
         if not 1 <= self.max_output_tokens <= 4096:
             raise ValueError("INFERENCE_MAX_OUTPUT_TOKENS must be in [1, 4096].")
+        if min(self.timeout_s, self.tool_timeout_s) <= 0:
+            raise ValueError("INFERENCE_TIMEOUT_S and AGENT_TOOL_TIMEOUT_S must be positive.")
         if self.evidence_budget() < 512:
             raise ValueError("Prompt budgets leave < 512 tokens for evidence; raise INFERENCE_MAX_MODEL_LEN.")
         if self.agent_max_steps < 1 or self.agent_max_tool_calls < 0 or self.max_retries < 0:
