@@ -30,32 +30,33 @@ def get_qdrant_client() -> QdrantClient:
 
 
 def ensure_collection() -> None:
-    """Create the collection if it does not already exist."""
+    """Create the collection and document-scoped payload indexes if missing."""
     client = get_qdrant_client()
 
-    if client.collection_exists(COLLECTION_NAME):
-        return
+    if not client.collection_exists(COLLECTION_NAME):
+        client.create_collection(
+            collection_name=COLLECTION_NAME,
+            vectors_config=models.VectorParams(
+                size=VECTOR_SIZE,
+                distance=models.Distance.COSINE,
+            ),
+        )
 
-    client.create_collection(
-        collection_name=COLLECTION_NAME,
-        vectors_config=models.VectorParams(
-            size=VECTOR_SIZE,
-            distance=models.Distance.COSINE,
-        ),
-    )
-
-    # Metadata indexes support document-scoped filtering.
-    client.create_payload_index(
-        collection_name=COLLECTION_NAME,
-        field_name="document_id",
-        field_schema=models.PayloadSchemaType.KEYWORD,
-    )
-
-    client.create_payload_index(
-        collection_name=COLLECTION_NAME,
-        field_name="document_version",
-        field_schema=models.PayloadSchemaType.KEYWORD,
-    )
+    # Metadata indexes support document-scoped filtering. Collections created
+    # before the indexes were added still need them, so ensure both fields on
+    # every call. Re-creating an existing index is a no-op.
+    for field_name in ("document_id", "document_version"):
+        try:
+            client.create_payload_index(
+                collection_name=COLLECTION_NAME,
+                field_name=field_name,
+                field_schema=models.PayloadSchemaType.KEYWORD,
+            )
+        except Exception as exc:
+            message = str(exc).lower()
+            if "exists" in message or "already" in message:
+                continue
+            raise
 
 
 def point_id_for_chunk(chunk_id: str) -> str:

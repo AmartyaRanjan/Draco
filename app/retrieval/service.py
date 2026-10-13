@@ -64,6 +64,10 @@ class RetrievalService:
         names = ("dense", "bm25")
         degraded, ok = [], []
         for name, r in zip(names, results):
+            if isinstance(r, asyncio.CancelledError):
+                # Cancellation is not a retriever failure: the caller went away.
+                # Re-raise so the request cancels instead of degrading.
+                raise r
             if isinstance(r, BaseException):
                 logger.error("retriever_failed", extra={"retriever": name, "error": type(r).__name__})
                 degraded.append(name)

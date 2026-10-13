@@ -96,8 +96,19 @@ def get_settings() -> RetrievalSettings:
 
 def load_calibration(path: str) -> list[tuple[float, float]]:
     """Monotone (raw_score, probability) points, e.g. from isotonic regression."""
-    with open(path) as fh:
-        pts = sorted((float(s), float(p)) for s, p in json.load(fh))
+    try:
+        with open(path) as fh:
+            raw = json.load(fh)
+    except OSError as exc:
+        raise ValueError(f"Calibration file {path!r} could not be read: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Calibration file {path!r} is not valid JSON: {exc}") from exc
+    try:
+        pts = sorted((float(s), float(p)) for s, p in raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"Calibration file {path!r} must be a list of [score, probability] pairs: {exc}"
+        ) from exc
     if len(pts) < 2 or any(b[1] < a[1] for a, b in zip(pts, pts[1:])):
         raise ValueError("Calibration points must be >= 2 and monotone non-decreasing.")
     return pts
