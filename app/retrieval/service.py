@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from app.db.registry import get_document
 from app.retrieval import fusion
 from app.retrieval.context import BuiltContext, TokenCounter, build_context
-from app.retrieval.generator import SYSTEM, WEAK_NOTE, OpenAICompatGenerator, GenerationResult
+from app.retrieval.generator import SYSTEM, WEAK_NOTE
 from app.retrieval.rerank import ColbertReranker
 from app.retrieval.retrievers import DenseRetriever, LexicalRetriever, prepare_query
 from app.retrieval.schema import Candidate, RetrievalError
@@ -47,11 +47,12 @@ class RetrievalService:
             s.colbert_batch_size, s.colbert_max_length, s.colbert_max_candidates)
         self.counter = counter or TokenCounter(s.tokenizer)
         self.calibrator = Calibrator(load_calibration(s.calibration_file)) if s.calibration_file else None
-        self.generator = generator if generator is not None else (
-            OpenAICompatGenerator(s.llm_base_url, s.llm_api_key, s.llm_model, s.llm_timeout_s,
-                                  s.llm_max_output_tokens, s.llm_temperature)
-            if s.llm_base_url and s.llm_model else None)
+        # Answer generation lives in app.inference; /query only generates if one is injected.
+        self.generator = generator
         self._filename = filename_lookup or (lambda d: (get_document(d) or {}).get("filename"))
+
+    def filename_for(self, document_id: str) -> str | None:
+        return self._filename(document_id)
 
     async def _hybrid(self, query, doc_ids, trace):
         t0 = now_ns()

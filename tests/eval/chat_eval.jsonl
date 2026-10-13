@@ -1,0 +1,13 @@
+{"id":"en-1","category":"english","message":"How many AI household agents were simulated in the AI Healthcare Policy Simulator project, and what data were they based on?","expect":{"contains_any":["49,736","49736"],"abstain":false}}
+{"id":"hi-1","category":"hindi","message":"एआई हेल्थकेयर पॉलिसी सिम्युलेटर प्रोजेक्ट में कितने एआई घरेलू एजेंट सिमुलेट किए गए थे?","expect":{"contains_any":["49,736","49736"],"abstain":false,"language":"hi"}}
+{"id":"mix-1","category":"mixed","message":"AI Healthcare Policy Simulator में कौन सी technologies use हुईं?","expect":{"contains_any":["Python","Reinforcement"],"abstain":false}}
+{"id":"id-1","category":"exact_identifier","message":"Which document mentions the lab report number Lab8 and roll number REG-NO-REDACTED?","expect":{"contains_any":["Lab8","REG-NO-REDACTED"],"abstain":false}}
+{"id":"multi-1","category":"multi_hop","message":"Compare how the 2DOF robotic arm technical report and the 2DOF research roadmap each describe the role of domain randomization.","expect":{"abstain":false,"min_citations":2}}
+{"id":"insuff-1","category":"insufficient_evidence","message":"What was the 2019 annual revenue of Tata Consultancy Services?","expect":{"abstain_or_insufficient":true}}
+{"id":"insuff-2","category":"insufficient_evidence","message":"What is the blood type of the author of the robotics report?","expect":{"abstain_or_insufficient":true}}
+{"id":"follow-1","category":"follow_up","setup":["Tell me about the AI Healthcare Policy Simulator project."],"message":"And which census year was that data from?","expect":{"contains_any":["2011"],"abstain":false}}
+{"id":"mem-1","category":"long_term_memory","memories":["The user prefers answers in Hindi (Devanagari script).","The user is a final-year B.Tech student."],"message":"Summarise the AI Healthcare Policy Simulator project in one sentence.","expect":{"language":"hi","abstain":false}}
+{"id":"tool-1","category":"tool_use","mode":"agent","message":"List the documents that are currently indexed.","expect":{"tool":"list_documents"}}
+{"id":"tool-2","category":"tool_use","mode":"agent","message":"Search the documents and tell me how many agents the healthcare policy simulator used.","expect":{"tool":"search_documents","contains_any":["49,736","49736"]}}
+{"id":"tool-3","category":"tool_use","mode":"agent","message":"What is 17 times 23?","expect":{"tool":null}}
+{"id":"toolfail-1","category":"tool_failure","mode":"agent","message":"Search for the healthcare simulator but only within document id 00000000-0000-0000-0000-000000000000.","document_ids":["00000000-0000-0000-0000-000000000000"],"expect":{"abstain_or_insufficient":true}}

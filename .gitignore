@@ -3,3 +3,5 @@
 __pycache__/
 *.py[cod]
 documents/
+app/storage/conversations.db
+eval_results/*.ragas.jsonl

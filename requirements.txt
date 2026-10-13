@@ -3,6 +3,10 @@ croniter==6.2.4
 docling==2.137.0
 fastapi==0.143.0
 httpx==0.28.1
+langchain-core==1.6.10
+langchain-openai==1.7.1
+openai==3.29.0
+pydantic==2.14.0
 opensearch-py==3.2.0
 pypdf==6.20.0
 python-dateutil==2.9.0.post0
