@@ -5,3 +5,5 @@ __pycache__/
 documents/
 app/storage/conversations.db
 eval_results/*.ragas.jsonl
+app/storage/agent.db*
+app/storage/artifacts/

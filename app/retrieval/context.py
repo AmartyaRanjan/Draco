@@ -26,13 +26,22 @@ class TokenCounter:
     def __init__(self, tokenizer_id: str | None):
         self._id, self._tok = tokenizer_id, None
 
-    def count(self, text: str) -> int:
+    def _load(self):
         if self._tok is None and self._id:
             try:
                 from transformers import AutoTokenizer
                 self._tok = AutoTokenizer.from_pretrained(self._id)
             except Exception:
                 self._id = None
+
+    @property
+    def exact(self) -> bool:
+        """True when counts come from a real tokenizer; False means the char-based estimate."""
+        self._load()
+        return self._tok is not None
+
+    def count(self, text: str) -> int:
+        self._load()
         if self._tok is not None:
             return len(self._tok.encode(text, add_special_tokens=False))
         return len(text) // 2 + 1

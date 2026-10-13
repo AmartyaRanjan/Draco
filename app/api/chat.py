@@ -10,6 +10,7 @@ from app.inference.config import get_inference_settings
 from app.inference.generation import ChatOrchestrator
 from app.inference.memory import SqliteConversationStore
 from app.inference.schemas import ChatRequest, InferenceError
+from app.retrieval.context import TokenCounter
 from app.retrieval.service import get_service
 
 logger = logging.getLogger("rag.inference")
@@ -21,7 +22,8 @@ def get_orchestrator() -> ChatOrchestrator:
     global _orchestrator
     if _orchestrator is None:
         s = get_inference_settings()
-        _orchestrator = ChatOrchestrator(get_service(), s, SqliteConversationStore(s.store_path))
+        # Budget prompt tokens with the *generation* model's tokenizer (retrieval's default is BGE-M3's).
+        _orchestrator = ChatOrchestrator(get_service(), s, SqliteConversationStore(s.store_path), counter=TokenCounter(s.model))
     return _orchestrator
 
 

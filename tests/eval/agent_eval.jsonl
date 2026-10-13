@@ -1,0 +1,9 @@
+{"id":"qa-fact","message":"How many AI household agents were simulated in the AI Healthcare Policy Simulator project?","expect":{"intent":"knowledge_qa","tools":["search_knowledge_base"],"status":["ok"],"contains":["49,736"],"min_citations":1}}
+{"id":"qa-abstain","message":"What is the capital of Atlantis according to the indexed documents?","expect":{"intent":"knowledge_qa","status":["abstained","ok","partial"],"abstains_or_declines":true}}
+{"id":"calc","message":"calculate 49736 * 0.15","expect":{"intent":"calculation","tools":["run_calculation"],"status":["ok"],"contains":["7460.4"],"max_llm_calls":0}}
+{"id":"artifact-pdf","message":"Create a PDF report summarizing the AI Healthcare Policy Simulator project","expect":{"intent":"artifact","tools":["search_knowledge_base","generate_document"],"status":["ok","partial"],"min_artifacts":1,"mode_requested":"thinking"}}
+{"id":"chart","message":"Plot a bar chart comparing 49736 simulated agents against a baseline of 10000 agents","expect":{"intent":"visualization","tools":["generate_chart_or_table"],"status":["ok","partial"],"min_artifacts":1}}
+{"id":"web-no-optin","message":"search the web for the latest AI news","expect":{"intent":"knowledge_qa","forbidden_tools":["web_search","fetch_webpage"]}}
+{"id":"web-unconfigured","message":"search the web for the latest AI news","allow_web":true,"expect":{"intent":"research","tools":["web_search"],"warn_contains":"web search failed"}}
+{"id":"compaction","message":"Summarize what the 2DOF robotic arm technical report says about the training pipeline and rewards","settings":{"evidence_compaction_ratio":0.3},"expect":{"tools":["search_knowledge_base"],"compaction_rung":"summarize_evidence","min_citations":1}}
+{"id":"thinking","message":"Compare how the 2DOF robotic arm technical report and the 2DOF research roadmap each describe domain randomization","reasoning":"thinking","expect":{"mode_applied":"thinking","min_citations":1}}
