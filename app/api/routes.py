@@ -39,6 +39,8 @@ async def upload_document(file: UploadFile = File(...)):
     # Generate the storage filename ourselves.
     # Do not trust the uploaded filename as a filesystem path.
     safe_filename = Path(file.filename).name
+    if not safe_filename or not safe_filename.strip() or safe_filename in (".", ".."):
+        raise HTTPException(400, "Filename is required")
     file_path = UPLOAD_DIR / f"{document_id}_{safe_filename}"
 
     size = 0
