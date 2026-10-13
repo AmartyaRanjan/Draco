@@ -12,7 +12,8 @@ from app.agent.graph import AgentRunner
 from app.agent.registry import CapabilityContext
 from app.agent.schemas import AgentChatRequest
 from app.agent.evidence import EvidenceStore
-from app.api.chat import current_user
+from app.core import concurrency
+from app.api.chat import current_user, heavy_user, read_user
 from app.inference.config import get_inference_settings
 from app.inference.memory import SqliteConversationStore
 from app.inference.schemas import InferenceError
@@ -48,9 +49,12 @@ async def _cap(runner: AgentRunner, name: str, args: dict, user: str):
 
 
 @router.post("/chat")
-async def agent_chat(req: AgentChatRequest, user: str = Depends(current_user), runner: AgentRunner = Depends(get_runner)):
+async def agent_chat(req: AgentChatRequest, user: str = Depends(heavy_user), runner: AgentRunner = Depends(get_runner)):
     try:
-        return (await runner.run(req, user)).model_dump()
+        async with concurrency.llm_slot():
+            return (await runner.run(req, user)).model_dump()
+    except HTTPException:
+        raise
     except InferenceError as exc:
         raise HTTPException(exc.status_code, f"{exc} ({exc.code})") from exc
     except Exception as exc:
@@ -59,7 +63,7 @@ async def agent_chat(req: AgentChatRequest, user: str = Depends(current_user), r
 
 
 @router.get("/capabilities")
-async def capabilities(user: str = Depends(current_user), runner: AgentRunner = Depends(get_runner)):
+async def capabilities(user: str = Depends(read_user), runner: AgentRunner = Depends(get_runner)):
     caps = runner.adapter.caps
     return {"capabilities": [c.describe() for c in runner.reg.all()], "groups": runner.reg.groups(),
             "unconfigured": runner.svc.missing(),
@@ -73,7 +77,7 @@ class ApproveBody(BaseModel):
 
 
 @router.post("/sources/{source_id}/approve")
-async def approve_source(source_id: str, body: ApproveBody | None = None, user: str = Depends(current_user),
+async def approve_source(source_id: str, body: ApproveBody | None = None, user: str = Depends(read_user),
                          runner: AgentRunner = Depends(get_runner)):
     try:
         ap = runner.svc.store.approve_source(source_id, user, approve=True, ttl_hours=runner.svc.settings.approval_ttl_hours)
@@ -88,7 +92,7 @@ async def approve_source(source_id: str, body: ApproveBody | None = None, user: 
 
 
 @router.post("/sources/{source_id}/reject")
-async def reject_source(source_id: str, user: str = Depends(current_user), runner: AgentRunner = Depends(get_runner)):
+async def reject_source(source_id: str, user: str = Depends(read_user), runner: AgentRunner = Depends(get_runner)):
     try:
         ap = runner.svc.store.approve_source(source_id, user, approve=False)
     except KeyError:
@@ -99,17 +103,17 @@ async def reject_source(source_id: str, user: str = Depends(current_user), runne
 
 
 @router.post("/sources/{source_id}/ingest")
-async def ingest_source(source_id: str, user: str = Depends(current_user), runner: AgentRunner = Depends(get_runner)):
+async def ingest_source(source_id: str, user: str = Depends(read_user), runner: AgentRunner = Depends(get_runner)):
     return (await _cap(runner, "ingest_approved_source", {"source_id": source_id}, user)).model_dump()
 
 
 @router.get("/sources/{source_id}")
-async def source_provenance(source_id: str, user: str = Depends(current_user), runner: AgentRunner = Depends(get_runner)):
+async def source_provenance(source_id: str, user: str = Depends(read_user), runner: AgentRunner = Depends(get_runner)):
     return (await _cap(runner, "inspect_source_provenance", {"source_id": source_id}, user)).model_dump()
 
 
 @router.get("/artifacts/{artifact_id}")
-async def download_artifact(artifact_id: str, user: str = Depends(current_user), runner: AgentRunner = Depends(get_runner)):
+async def download_artifact(artifact_id: str, user: str = Depends(read_user), runner: AgentRunner = Depends(get_runner)):
     try:
         rec, path = runner.svc.artifact_store.resolve(artifact_id, user)   # owner, expiry, file present
     except A.ArtifactError:
@@ -126,5 +130,5 @@ class FeedbackBody(BaseModel):
 
 
 @router.post("/feedback")
-async def feedback(body: FeedbackBody, user: str = Depends(current_user), runner: AgentRunner = Depends(get_runner)):
+async def feedback(body: FeedbackBody, user: str = Depends(read_user), runner: AgentRunner = Depends(get_runner)):
     return (await _cap(runner, "record_feedback", body.model_dump(), user)).model_dump()

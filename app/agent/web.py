@@ -20,7 +20,15 @@ ALLOWED_TYPES = ("text/html", "application/xhtml+xml", "text/plain", "text/markd
 _INJECTION = re.compile(
     r"(ignore (all |any |the )?(previous|prior|above) (instructions|prompts)|disregard (the )?(system|previous)|"
     r"you are now|new instructions:|system prompt|<\|im_start\|>|</?(system|assistant)>|"
-    r"(reveal|print|send) .{0,30}(api[ _-]?key|password|secret))", re.I)
+    r"(reveal|print|send|disclose) .{0,30}(api[ _-]?key|password|secret)|"
+    r"disregard (what|the user|your|all|any)|(reply|respond|answer|output|write) (only |exactly )?with (exactly |only )?(?-i:[\"'`A-Z])|"
+    r"do not (answer|follow|obey) (the )?(user|question|above)|call (the )?(tool|function|capability) )", re.I)
+
+
+def looks_injected(text: str) -> bool:
+    """Heuristic only: instruction-like text inside fetched content. Used to withhold passages from the model, as one
+    layer among several (untrusted labelling, no approval-free side effects, citation validation). Paraphrases get past it."""
+    return bool(_INJECTION.search(text))
 
 
 class UrlPolicyError(Exception):

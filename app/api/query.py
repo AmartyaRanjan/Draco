@@ -1,8 +1,10 @@
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from app.api.chat import heavy_user
+from app.core import concurrency
 from app.retrieval.context import pages
 from app.retrieval.schema import RetrievalError
 from app.retrieval.service import MAX_QUERY_CHARS, get_service
@@ -19,14 +21,17 @@ class QueryRequest(BaseModel):
 
 
 @router.post("/query")
-async def query(req: QueryRequest):
+async def query(req: QueryRequest, user: str = Depends(heavy_user)):
     svc = get_service()
     try:
         if req.generate:
-            out, gen = await svc.answer(req.query, req.document_ids)
+            async with concurrency.llm_slot():
+                out, gen = await svc.answer(req.query, req.document_ids)
         else:
             out, gen = await svc.retrieve(req.query, req.document_ids), None
             out.trace.finish("degraded" if out.degraded else "ok")
+    except HTTPException:
+        raise
     except RetrievalError as exc:
         logger.error("query_failed", extra={"stage": exc.stage})
         raise HTTPException(exc.status_code, f"{exc} (stage: {exc.stage})") from exc

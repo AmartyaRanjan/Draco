@@ -37,7 +37,7 @@ class EmptySafeFilenameTests(unittest.TestCase):
         registry.init_db()
 
     def upload(self, filename):
-        file = UploadFile(file=io.BytesIO(b"hello"), filename=filename)
+        file = UploadFile(file=io.BytesIO(b"%PDF-1.7 hello"), filename=filename)
         return asyncio.run(routes.upload_document(file))
 
     def test_path_only_filename_rejected(self):

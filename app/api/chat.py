@@ -6,6 +6,7 @@ import logging
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+from app.core import concurrency, ratelimit
 from app.inference.config import get_inference_settings
 from app.inference.generation import ChatOrchestrator
 from app.inference.memory import SqliteConversationStore
@@ -27,16 +28,27 @@ def get_orchestrator() -> ChatOrchestrator:
     return _orchestrator
 
 
-async def current_user(x_api_key: str | None = Header(default=None)) -> str:
-    """Authenticate at the application boundary; returns the user id bound to the API key."""
+async def current_user(request: Request, x_api_key: str | None = Header(default=None)) -> str:
+    """Authenticate at the application boundary; returns the user id bound to the API key.
+    Failed attempts are throttled per client address so keys cannot be brute-forced."""
     s = get_inference_settings()
     if s.auth_disabled:
         return "anonymous"
+    ip = ratelimit.client_ip(request)
+    blocked = await ratelimit.check("authfail", ip, cost=0)  # peek: a locked-out address is refused even with a valid key
+    if not blocked.allowed:
+        raise ratelimit.reject("authfail", blocked, "Too many failed authentication attempts")
     if x_api_key:
         for key, user in s.api_keys.items():
             if hmac.compare_digest(key.encode(), x_api_key.encode()):
                 return user
+    await ratelimit.check("authfail", ip)
     raise HTTPException(401, "Invalid or missing API key")
+
+
+heavy_user = ratelimit.limited("heavy", current_user)  # LLM-backed routes
+read_user = ratelimit.limited("read", current_user)
+upload_user = ratelimit.limited("upload", current_user)
 
 
 def _http(exc: InferenceError) -> HTTPException:
@@ -44,10 +56,13 @@ def _http(exc: InferenceError) -> HTTPException:
 
 
 @router.post("/chat")
-async def chat(req: ChatRequest, user: str = Depends(current_user),
+async def chat(req: ChatRequest, user: str = Depends(heavy_user),
                orch: ChatOrchestrator = Depends(get_orchestrator)):
     try:
-        return (await orch.run(req, user)).model_dump()
+        async with concurrency.llm_slot():
+            return (await orch.run(req, user)).model_dump()
+    except HTTPException:
+        raise
     except InferenceError as exc:
         raise _http(exc) from exc
     except Exception as exc:
@@ -56,10 +71,11 @@ async def chat(req: ChatRequest, user: str = Depends(current_user),
 
 
 @router.post("/chat/stream")
-async def chat_stream(req: ChatRequest, request: Request, user: str = Depends(current_user),
+async def chat_stream(req: ChatRequest, request: Request, user: str = Depends(heavy_user),
                       orch: ChatOrchestrator = Depends(get_orchestrator)):
     """SSE events: start | token | tool_call | tool_result | done | error. `done.response` is the
     validated final answer and supersedes the streamed text; incomplete runs are never persisted."""
+    await concurrency.acquire_llm_slot()  # 503 now, before the stream starts, if the model is saturated
     queue: asyncio.Queue = asyncio.Queue()
 
     async def emit(ev):
@@ -73,6 +89,7 @@ async def chat_stream(req: ChatRequest, request: Request, user: str = Depends(cu
         except Exception:
             pass  # run() already emitted an error event
         finally:
+            concurrency.release_llm_slot()
             await queue.put(None)
 
     task = asyncio.create_task(work())

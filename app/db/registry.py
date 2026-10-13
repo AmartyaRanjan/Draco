@@ -19,6 +19,8 @@ def init_db():
     # file handle survives until cyclic GC, which holds an exclusive lock
     # on Windows and leaks descriptors in long-lived API/worker processes.
     with closing(get_connection()) as conn:
+        # WAL: the API and the ingestion worker both write this file; readers must not block writers (persists in the file).
+        conn.execute("PRAGMA journal_mode=WAL")
         with conn:
             conn.execute("""
             CREATE TABLE IF NOT EXISTS documents (

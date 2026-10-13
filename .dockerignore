@@ -1,0 +1,10 @@
+.venv
+.git
+.env
+.env.*
+documents
+eval_results
+app/storage
+__pycache__
+*.pyc
+tests

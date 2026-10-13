@@ -1,3 +1,4 @@
+import re
 """LangChain ChatOpenAI client for the vLLM OpenAI-compatible server."""
 import openai
 from langchain_openai import ChatOpenAI
@@ -24,6 +25,20 @@ def build_llm(s: InferenceSettings, *, thinking: bool, max_tokens: int | None = 
         stream_usage=True,
         extra_body={"top_k": s.top_k, "chat_template_kwargs": {"enable_thinking": thinking}},
     )
+
+
+_OVERFLOW = re.compile(r"maximum context length is \d+ tokens.*?requested \d+ output tokens and your prompt contains", re.S)
+
+
+def reduced_output_cap(exc: BaseException, current: int, floor: int = 256, factor: float = 0.7) -> int | None:
+    """If the server rejected the request only because prompt + max_tokens overran the window, a smaller max_tokens to try
+    (our token estimate cannot see chat-template and tool-schema overhead). The server's "at least N input tokens" is
+    just window + 1 - max_tokens, a bound that says nothing about the real prompt size, so shrink geometrically instead
+    of parsing it. None if it is some other error or the cap would fall below `floor`."""
+    if not _OVERFLOW.search(str(exc)):
+        return None
+    smaller = int(current * factor)
+    return smaller if smaller >= floor else None
 
 
 def map_error(exc: BaseException) -> InferenceError:

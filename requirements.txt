@@ -13,6 +13,7 @@ openai==3.29.0
 openpyxl==3.1.5
 opensearch-py==3.2.0
 pillow==12.3.0
+prometheus-client==0.26.0
 pydantic==2.14.0
 pypdf==6.20.0
 python-dateutil==2.9.0.post0

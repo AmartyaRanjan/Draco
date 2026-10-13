@@ -225,7 +225,10 @@ class ServiceTests(unittest.TestCase):
 
 class ApiTests(unittest.TestCase):
     def test_validation_and_error_mapping(self):
+        from app.api.chat import current_user
         from app.main import app
+        app.dependency_overrides[current_user] = lambda: "tester"
+        self.addCleanup(app.dependency_overrides.clear)
         client = TestClient(app)
         self.assertEqual(client.post("/query", json={"query": ""}).status_code, 422)
         s = svc(FakeRetriever(fail=True), FakeRetriever(fail=True))

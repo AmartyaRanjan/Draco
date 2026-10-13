@@ -55,6 +55,7 @@ class SqliteConversationStore:
         c.row_factory = sqlite3.Row
         if not self._ready:
             with self._lock:
+                c.execute("PRAGMA journal_mode=WAL")
                 c.executescript("""
                 CREATE TABLE IF NOT EXISTS conversations (
                   conversation_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, summary TEXT,

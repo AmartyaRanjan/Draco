@@ -33,7 +33,7 @@ from app.agent.registry import CapabilityContext, CapabilityRegistry, TraceRecor
 from app.agent.runtime import ModePolicy, ReasoningController, ReasoningMode, RuntimeAdapter
 from app.agent.schemas import AgentChatRequest, AgentChatResponse, AgentTraceEntry, CitationOut
 from app.agent.summarize import EvidenceSummary, render_summary
-from app.inference.client import map_error
+from app.inference.client import map_error, reduced_output_cap
 from app.inference.memory import ConversationStore
 from app.inference.schemas import InferenceError
 
@@ -62,8 +62,16 @@ def requested_format(message: str) -> str | None:
     return next((f for p, f in _FMT if re.search(p, m)), None)
 
 
+_GREET = r"(hi+|hello+|hey+|namaste|good (morning|afternoon|evening)|thanks?( you)?|thank you( so much)?|bye|goodbye|how are you( doing)?( today)?|who are you|what can you do|help)"
+_SMALLTALK = re.compile(rf"^\W*{_GREET}(\W+{_GREET})?\W*$", re.I)
+SMALLTALK_REPLY = ("Hello! I can answer questions about the indexed documents (with citations), run calculations, and create "
+                   "reports, spreadsheets, presentations and charts from them. What would you like to know?")
+
+
 def classify(message: str, has_docs: bool, allow_web: bool) -> dict:
     m = message.lower()
+    if _SMALLTALK.match(m):  # a greeting needs no retrieval, tools or model call
+        return {"intent": "smalltalk", "wants_web": False, "wants_ingest": False, "has_numbers": False}
     flags = {"wants_web": bool(allow_web and re.search(_WEB, m)), "wants_ingest": bool(allow_web and re.search(_SAVE, m)),
              "has_numbers": bool(re.search(r"\d", m))}
     kind = next((k for k, p in _KINDS.items() if re.search(p, m)), None)
@@ -98,6 +106,7 @@ GROUPS_BY_INTENT = {
     "calculation": {"computation"},
     "file_analysis": {"file_analysis", "computation", "visualization"},
     "provenance": {"knowledge_management"},
+    "smalltalk": set(),
 }
 
 
@@ -397,13 +406,25 @@ class AgentRunner:
             # step instead of hoping a small model chooses to call it (live runs showed it sometimes does not).
             choice = force if (step == 0 and force and any(sp["function"]["name"] == force for sp in specs)) else None
             try:
-                try:
-                    ai = await (llm.bind_tools(specs, tool_choice=choice) if choice else llm.bind_tools(specs)).ainvoke(msgs)
-                except Exception as exc:
-                    if choice is None or "BadRequest" not in type(exc).__name__:
-                        raise
-                    warns.append("runtime rejected a forced tool choice; fell back to automatic tool choice")
-                    ai = await llm.bind_tools(specs).ainvoke(msgs)
+                shrinks = 0
+                while True:
+                    try:
+                        ai = await (llm.bind_tools(specs, tool_choice=choice) if choice else llm.bind_tools(specs)).ainvoke(msgs)
+                        break
+                    except Exception as exc:
+                        # prompt + max_tokens overran the window by the template/tool-schema overhead our counter cannot see;
+                        # the server does not say by how much, so shrink the output cap geometrically (bounded).
+                        smaller = reduced_output_cap(exc, cap) if shrinks < 4 else None
+                        if smaller is not None and smaller < cap:
+                            shrinks += 1
+                            warns.append(f"output cap reduced from {cap} to {smaller} tokens to fit the context window")
+                            cap = smaller
+                            llm = self.adapter.build_llm(d, max_tokens=cap, cap=cap)
+                        elif choice is not None and "BadRequest" in type(exc).__name__:
+                            warns.append("runtime rejected a forced tool choice; fell back to automatic tool choice")
+                            choice = None
+                        else:
+                            raise
             except Exception as exc:
                 raise map_error(exc) from exc
             c["llm_steps"] += 1
@@ -616,6 +637,8 @@ class AgentRunner:
         c, i = dict(state["counters"]), state["classification"]["intent"]
         results = state.get("results", [])
         ok_results = [r for r in results if r["status"] in ("success", "pending")]
+        if i == "smalltalk":
+            return {"answer": SMALLTALK_REPLY, "finish_reason": "deterministic", "abstain": False}
         # Pure deterministic answers need no model call.
         calc = next((r for r in results if r["tool"] == "run_calculation" and r["status"] == "success"), None)
         if i == "calculation" and calc and not run.evidence.items:

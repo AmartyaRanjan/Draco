@@ -298,3 +298,18 @@ class ApiTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReducedOutputCapTests(unittest.TestCase):
+    MSG = ("Error code: 400 - This model's maximum context length is 8192 tokens. However, you requested 2400 output tokens "
+           "and your prompt contains at least 5793 input tokens, for a total of at least 8193 tokens.")
+
+    def test_shrinks_geometrically_on_overflow(self):
+        from app.inference.client import reduced_output_cap
+        self.assertEqual(reduced_output_cap(Exception(self.MSG), 2400), 1680)
+        self.assertEqual(reduced_output_cap(Exception(self.MSG), 1680), 1176)
+
+    def test_none_below_floor_or_for_other_errors(self):
+        from app.inference.client import reduced_output_cap
+        self.assertIsNone(reduced_output_cap(Exception(self.MSG), 300))
+        self.assertIsNone(reduced_output_cap(Exception("Error code: 400 - invalid tool schema"), 2400))

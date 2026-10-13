@@ -13,6 +13,9 @@ from app.api import routes
 from app.db import registry
 
 
+PDF = b"%PDF-1.7\n"  # uploads are sniffed for the PDF header
+
+
 class UploadRouteTests(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
@@ -32,7 +35,7 @@ class UploadRouteTests(unittest.TestCase):
         registry.init_db()
 
     def upload(self, data: bytes, filename="a.pdf"):
-        file = UploadFile(file=io.BytesIO(data), filename=filename)
+        file = UploadFile(file=io.BytesIO(PDF + data), filename=filename)
         return asyncio.run(routes.upload_document(file))
 
     def stored_files(self):
@@ -44,7 +47,7 @@ class UploadRouteTests(unittest.TestCase):
         self.assertEqual(response["status"], "queued")
         self.assertFalse(response["duplicate"])
         document = registry.get_document(response["document_id"])
-        self.assertEqual(document["content_hash"], hashlib.sha256(b"hello").hexdigest())
+        self.assertEqual(document["content_hash"], hashlib.sha256(PDF + b"hello").hexdigest())
         self.assertEqual(self.queue.enqueue.call_count, 1)
 
     def test_duplicate_upload_returns_existing_document_without_new_job(self):
@@ -74,6 +77,14 @@ class UploadRouteTests(unittest.TestCase):
         retry = self.upload(b"payload")
         self.assertEqual(retry["status"], "queued")
         self.assertFalse(retry["duplicate"])
+
+    def test_non_pdf_is_rejected_before_queueing(self):
+        for name, data in (("notes.txt", PDF + b"x"), ("fake.pdf", b"MZ\x90\x00 not a pdf")):
+            with self.assertRaises(HTTPException) as ctx:
+                asyncio.run(routes.upload_document(UploadFile(file=io.BytesIO(data), filename=name)))
+            self.assertEqual(ctx.exception.status_code, 415)
+        self.assertEqual(self.queue.enqueue.call_count, 0)
+        self.assertEqual(self.stored_files(), [])
 
     def test_pages_endpoint(self):
         response = self.upload(b"x")

@@ -2,9 +2,10 @@ import hashlib
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 
+from app.api.chat import read_user, upload_user
 from app.core.queue import ingestion_queue
 from app.db.registry import (
     FAILED_STATUS,
@@ -27,7 +28,7 @@ UPLOAD_DIR = (
 MAX_FILE_SIZE = 100 * 1024 * 1024  # 100 MB
 
 
-@router.post("/documents", status_code=202)
+@router.post("/documents", status_code=202, dependencies=[Depends(upload_user)])
 async def upload_document(file: UploadFile = File(...)):
     if not file.filename:
         raise HTTPException(400, "Filename is required")
@@ -41,6 +42,9 @@ async def upload_document(file: UploadFile = File(...)):
     safe_filename = Path(file.filename).name
     if not safe_filename or not safe_filename.strip() or safe_filename in (".", ".."):
         raise HTTPException(400, "Filename is required")
+    if Path(safe_filename).suffix.lower() != ".pdf":
+        # The worker only converts PDFs; failing here beats queueing a job that is certain to fail.
+        raise HTTPException(415, "Only PDF files are supported")
     file_path = UPLOAD_DIR / f"{document_id}_{safe_filename}"
 
     size = 0
@@ -55,6 +59,8 @@ async def upload_document(file: UploadFile = File(...)):
                 if not chunk:
                     break
 
+                if size == 0 and not chunk.lstrip(b"\x00 \t\r\n")[:5] == b"%PDF-":
+                    raise HTTPException(415, "File content is not a PDF")
                 size += len(chunk)
                 digest.update(chunk)
 
@@ -130,7 +136,7 @@ async def upload_document(file: UploadFile = File(...)):
     finally:
         await file.close()
 
-@router.get("/documents/{document_id}")
+@router.get("/documents/{document_id}", dependencies=[Depends(read_user)])
 def document_status(document_id: str):
     document = get_document(document_id)
 
@@ -140,7 +146,7 @@ def document_status(document_id: str):
     return document
 
 
-@router.get("/documents/{document_id}/pages")
+@router.get("/documents/{document_id}/pages", dependencies=[Depends(read_user)])
 def document_pages(document_id: str):
     if get_document(document_id) is None:
         raise HTTPException(404, "Document not found")
