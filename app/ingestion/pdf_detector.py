@@ -27,6 +27,18 @@ class DetectorConfig:
     # which page-level routing needs (about 5 ms per page).
     max_pages: int | None = None
 
+    def __post_init__(self):
+        if self.max_pages is not None and self.max_pages < 1:
+            raise ValueError("DetectorConfig max_pages must be None or >= 1.")
+        if self.min_digital_chars < 0 or self.max_scanned_chars < 0:
+            raise ValueError("DetectorConfig char thresholds must be >= 0.")
+        if self.min_digital_chars <= self.max_scanned_chars:
+            raise ValueError(
+                "DetectorConfig min_digital_chars must exceed max_scanned_chars."
+            )
+        if self.large_image_pixels < 1:
+            raise ValueError("DetectorConfig large_image_pixels must be >= 1.")
+
 
 @dataclass(frozen=True)
 class PageResult:
@@ -52,14 +64,18 @@ class PdfInspection:
 
     @property
     def digital_ratio(self) -> float:
+        if not self.pages:
+            return 0.0
         return self.count("digital") / len(self.pages)
 
     @property
     def all_digital(self) -> bool:
-        return self.count("digital") == len(self.pages)
+        return bool(self.pages) and self.count("digital") == len(self.pages)
 
 
 def _sample_indices(page_count: int, max_pages: int | None) -> list[int]:
+    if max_pages is not None and max_pages < 1:
+        raise ValueError("max_pages must be None or >= 1.")
     if max_pages is None or page_count <= max_pages:
         return list(range(page_count))
     # Evenly spaced, so late pages are covered as well as the first ones.
