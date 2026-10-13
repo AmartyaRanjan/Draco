@@ -8,6 +8,7 @@ import json
 import sqlite3
 import threading
 import uuid
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -70,12 +71,14 @@ class SqliteConversationStore:
         return c
 
     def owner(self, conversation_id: str) -> str | None:
-        with self._conn() as c:
+        # closing() is required: sqlite3.Connection as a context manager only
+        # commits/rolls back, it never closes.
+        with closing(self._conn()) as c:
             r = c.execute("SELECT user_id FROM conversations WHERE conversation_id=?", (conversation_id,)).fetchone()
-        return r["user_id"] if r else None
+            return r["user_id"] if r else None
 
     def load(self, user_id, conversation_id, limit):
-        with self._conn() as c:
+        with closing(self._conn()) as c:
             conv = c.execute("SELECT user_id, summary FROM conversations WHERE conversation_id=?",
                              (conversation_id,)).fetchone()
             if conv is None:
@@ -84,18 +87,19 @@ class SqliteConversationStore:
                 raise PermissionError("conversation belongs to another user")
             rows = c.execute("SELECT role, content FROM messages WHERE conversation_id=? "
                              "ORDER BY id DESC LIMIT ?", (conversation_id, limit)).fetchall()
-        return ConversationContext(conv["summary"], [dict(r) for r in reversed(rows)])
+            return ConversationContext(conv["summary"], [dict(r) for r in reversed(rows)])
 
     def save_turn(self, user_id, conversation_id, user_msg, response_json, answer, tool_outputs):
         run_id = json.loads(response_json)["metadata"]["request_id"]
-        with self._conn() as c:  # one transaction: all or nothing
-            c.execute("INSERT OR IGNORE INTO conversations (conversation_id, user_id) VALUES (?, ?)",
-                      (conversation_id, user_id))
-            c.executemany("INSERT INTO messages (conversation_id, role, content) VALUES (?, ?, ?)",
-                          [(conversation_id, "user", user_msg), (conversation_id, "assistant", answer)])
-            c.execute("INSERT INTO inference_runs (run_id, conversation_id, user_id, response_json, "
-                      "tool_outputs_json) VALUES (?, ?, ?, ?, ?)",
-                      (run_id, conversation_id, user_id, response_json, json.dumps(tool_outputs)))
+        with closing(self._conn()) as c:
+            with c:  # one transaction: all or nothing
+                c.execute("INSERT OR IGNORE INTO conversations (conversation_id, user_id) VALUES (?, ?)",
+                          (conversation_id, user_id))
+                c.executemany("INSERT INTO messages (conversation_id, role, content) VALUES (?, ?, ?)",
+                              [(conversation_id, "user", user_msg), (conversation_id, "assistant", answer)])
+                c.execute("INSERT INTO inference_runs (run_id, conversation_id, user_id, response_json, "
+                          "tool_outputs_json) VALUES (?, ?, ?, ?, ?)",
+                          (run_id, conversation_id, user_id, response_json, json.dumps(tool_outputs)))
 
 
 def new_conversation_id() -> str:
