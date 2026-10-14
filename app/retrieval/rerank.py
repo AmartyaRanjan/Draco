@@ -62,7 +62,7 @@ class ColbertReranker:
             for s in range(0, len(order), self.batch_size):
                 idx = order[s:s + self.batch_size]
                 p, pm = self._encode([texts[i] for i in idx])
-                sim = torch.einsum("qd,bpd->bqp", q, p).masked_fill(~pm[:, None, :], -1.0)
+                sim = torch.einsum("qd,bpd->bqp", q, p).masked_fill(~pm[:, None, :], float("-inf"))
                 scores = sim.max(dim=-1).values.mean(dim=-1).float().cpu().tolist()
                 for i, sc in zip(idx, scores):
                     out[i] = sc

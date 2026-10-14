@@ -1,4 +1,5 @@
 """Adaptive relevance selection: threshold + minimum-evidence fallback."""
+import math
 from dataclasses import dataclass
 
 from app.retrieval.schema import Candidate
@@ -40,6 +41,8 @@ def select(ranked: list[Candidate], threshold: float, min_selected: int, max_sel
     valid, seen = [], set()
     for c in ranked:
         if c.colbert_score is None or not c.text or c.chunk_id in seen:
+            continue
+        if not math.isfinite(c.colbert_score):
             continue
         seen.add(c.chunk_id)
         if calibrator:
