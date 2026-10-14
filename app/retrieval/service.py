@@ -138,6 +138,8 @@ class RetrievalService:
                 with trace.stage("llm"):
                     gen = await self.generator.generate(
                         out.query, out.context, weak=not (out.selection and out.selection.evidence_sufficient))
+                for label in gen.invalid_markers:  # never let unverifiable references reach the client
+                    gen.answer = gen.answer.replace(f"[{label}]", "")
                 trace.stages.update({k: {"ms": v, "status": "ok"} for k, v in gen.timings.items()})
                 trace.set(**gen.usage, invalid_citations=gen.invalid_markers)
         except BaseException:
