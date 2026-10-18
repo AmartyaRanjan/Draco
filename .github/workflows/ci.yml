@@ -14,5 +14,32 @@ jobs:
           pip install --index-url https://download.pytorch.org/whl/cpu torch==2.14.1
           grep -v -E '^(torch|docling)==' requirements.txt > /tmp/req.txt
           pip install -r /tmp/req.txt
-      - name: Unit tests (no live services; integration tests skip themselves)
+          pip install -e . pytest
+      - name: Existing unit tests (no live services; integration tests skip themselves)
         run: python -m unittest discover -s tests -t . -v
+      - name: Draco tests (unit, integration, reliability, examples, deterministic evals)
+        run: python -m pytest tests/draco -q
+      - name: Deterministic control-plane evals
+        run: python -m tests.draco.eval.runner
+
+  draco-core:
+    # Proves the framework installs and runs without torch/qdrant/langgraph: only pydantic + httpx.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.14"}
+      - name: Install draco with dev tools only
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Lint and types
+        run: |
+          ruff check src tests/draco examples
+          mypy src/draco
+      - name: Framework tests that need no ML stack
+        run: python -m pytest tests/draco/unit tests/draco/reliability -q
+      - name: Dependency audit (framework deps, then the app's pinned requirements)
+        run: |
+          pip-audit --skip-editable --strict --desc
+          pip-audit -r requirements.txt --no-deps --disable-pip --desc

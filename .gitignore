@@ -9,3 +9,8 @@ app/storage/agent.db*
 app/storage/artifacts/
 eval_results/*.raw.json
 eval_results/*.log
+
+# packaging
+*.egg-info/
+build/
+dist/
