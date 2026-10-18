@@ -1,0 +1,9 @@
+{"id": "ok", "scenario": "ok", "expect": "completed"}
+{"id": "raises", "scenario": "raise", "expect": "failed"}
+{"id": "sleeps", "scenario": "sleep", "timeout_s": 0.05, "expect": "timeout"}
+{"id": "cancelled", "scenario": "sleep", "cancel_after": 0.05, "expect": "cancelled"}
+{"id": "models", "scenario": "models", "limits": {"max_model_calls": 2}, "expect": "budget_exhausted"}
+{"id": "tools", "scenario": "tools", "limits": {"max_tool_calls": 2}, "expect": "budget_exhausted"}
+{"id": "recursion", "scenario": "recurse", "limits": {"max_depth": 3}, "expect": "completed", "expect_output_contains": "budget_exhausted"}
+{"id": "handoff", "scenario": "handoff", "expect": "handoff"}
+{"id": "waiting", "scenario": "wait", "expect": "waiting"}

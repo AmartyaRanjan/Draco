@@ -1,0 +1,7 @@
+{"id": "answers-with-citation", "query": "q", "dense": ["c1", "c2"], "lexical": ["c2", "c3"], "generator": true, "expect_abstain": null, "expect_citation": "c1"}
+{"id": "no-evidence-abstains", "query": "q", "dense": [], "lexical": [], "generator": true, "expect_abstain": "no_evidence"}
+{"id": "no-generator", "query": "q", "dense": ["c1"], "lexical": [], "generator": false, "expect_abstain": "generator_not_configured"}
+{"id": "bm25-down-degrades", "query": "q", "dense": ["c1", "c2"], "lexical": "fail", "generator": true, "expect_abstain": null, "expect_degraded": ["bm25"]}
+{"id": "dense-down-degrades", "query": "q", "dense": "fail", "lexical": ["c1"], "generator": true, "expect_abstain": null, "expect_degraded": ["dense"]}
+{"id": "empty-query", "query": "", "dense": ["c1"], "lexical": [], "generator": true, "expect_error": "contract"}
+{"id": "both-down", "query": "q", "dense": "fail", "lexical": "fail", "generator": true, "expect_error": "provider"}
