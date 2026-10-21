@@ -8,14 +8,11 @@ from fastapi.responses import JSONResponse
 from app.api.chat import read_user, upload_user
 from app.core.queue import ingestion_queue
 from app.db.registry import (
-    FAILED_STATUS,
     get_document_for_owner,
     get_pages_for_owner,
     register_upload,
-    update_status,
-    set_job_id,
 )
-from app.ingestion.worker import process_document
+from app.ingestion.dispatch import submit_document
 
 router = APIRouter()
 
@@ -84,38 +81,36 @@ async def upload_document(file: UploadFile = File(...), user: str = Depends(uplo
         )
 
         if existing is not None:
-            # Identical content is already registered: keep one copy and point
-            # the caller at it instead of ingesting it twice.
+            # Repeated requests also recover a persisted upload whose publication
+            # was interrupted before it reached the queue.
             file_path.unlink(missing_ok=True)
+            job_id = submit_document(existing["document_id"], ingestion_queue)
+            if not job_id:
+                raise HTTPException(503, "Ingestion is being recovered. Please retry.")
+            registry_document = get_document_for_owner(existing["document_id"], user)
+            if registry_document is None:
+                raise HTTPException(404, "Document not found")
             return JSONResponse(
                 status_code=200,
                 content={
-                    "document_id": existing["document_id"],
-                    "job_id": existing["job_id"],
-                    "filename": existing["filename"],
-                    "status": existing["status"],
+                    "document_id": registry_document["document_id"],
+                    "job_id": job_id,
+                    "filename": registry_document["filename"],
+                    "status": registry_document["status"],
                     "duplicate": True,
-                    "message": "Identical file already ingested; no new job queued",
+                    "message": "Identical file already registered; existing ingestion reused",
                 },
             )
 
         registered = True
 
-        update_status(document_id, "queued")
-
-        job = ingestion_queue.enqueue(
-            process_document,
-            document_id,
-            str(file_path.resolve()),
-            job_timeout=3600,
-            result_ttl=86400,
-        )
-
-        set_job_id(document_id, job.id)
+        job_id = submit_document(document_id, ingestion_queue)
+        if not job_id:
+            raise RuntimeError("Ingestion publication is already in progress")
 
         return {
             "document_id": document_id,
-            "job_id": job.id,
+            "job_id": job_id,
             "filename": safe_filename,
             "status": "queued",
             "duplicate": False,
@@ -123,18 +118,16 @@ async def upload_document(file: UploadFile = File(...), user: str = Depends(uplo
         }
 
     except HTTPException:
-        file_path.unlink(missing_ok=True)
+        if not registered:
+            file_path.unlink(missing_ok=True)
         raise
 
     except Exception as exc:
-        file_path.unlink(missing_ok=True)
-        if registered:
-            # Otherwise this row would stay "queued" forever and make every
-            # re-upload of the same file look like a duplicate of it.
-            update_status(document_id, FAILED_STATUS, error="Could not queue the file")
+        if not registered:
+            file_path.unlink(missing_ok=True)
         raise HTTPException(
             503,
-            "Could not queue the file. Please retry.",
+            "Could not queue the file. The persisted upload will be retried.",
         ) from exc
 
     finally:

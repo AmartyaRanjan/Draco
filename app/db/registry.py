@@ -1,6 +1,7 @@
 import sqlite3
 from contextlib import closing
 from pathlib import Path
+import time
 
 DB_PATH = Path(__file__).resolve().parents[1] / "storage" / "documents.db"
 
@@ -50,6 +51,32 @@ def init_db():
             conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_documents_owner_id
             ON documents (owner_id)
+        """)
+            conn.execute("""
+            CREATE TABLE IF NOT EXISTS ingestion_outbox (
+                document_id TEXT PRIMARY KEY REFERENCES documents(document_id),
+                state TEXT NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                queue_job_id TEXT,
+                lease_until REAL,
+                next_attempt_at REAL NOT NULL DEFAULT 0,
+                last_error TEXT,
+                updated_at REAL NOT NULL
+            )
+        """)
+            conn.execute("""
+            INSERT OR IGNORE INTO ingestion_outbox (document_id, state, queue_job_id, updated_at)
+            SELECT document_id,
+                CASE
+                    WHEN status = 'completed' THEN 'completed'
+                    WHEN status = 'failed' THEN 'failed'
+                    WHEN status = 'processing' THEN 'running'
+                    WHEN status = 'queued' AND job_id IS NOT NULL THEN 'queued'
+                    ELSE 'pending'
+                END,
+                job_id,
+                strftime('%s', 'now')
+            FROM documents
         """)
 
             conn.execute("""
@@ -122,6 +149,10 @@ def register_upload(document_id, filename, file_path, content_hash, owner_id=Non
             VALUES (?, ?, ?, 'uploaded', ?, ?)
             """,
             (document_id, filename, file_path, content_hash, owner_id),
+        )
+        conn.execute(
+            "INSERT INTO ingestion_outbox (document_id, state, updated_at) VALUES (?, 'pending', ?)",
+            (document_id, time.time()),
         )
         conn.commit()
         return None
@@ -248,6 +279,129 @@ def assign_unowned_documents(owner_id, expected_count):
         return count
 
 
+def ensure_ingestion_outbox(document_id):
+    with closing(get_connection()) as conn, conn:
+        document = conn.execute(
+            "SELECT status, job_id FROM documents WHERE document_id = ?",
+            (document_id,),
+        ).fetchone()
+        if document is None:
+            raise KeyError(f"document {document_id!r} not found")
+        state = {
+            "completed": "completed",
+            "failed": "failed",
+            "processing": "running",
+            "queued": "queued" if document["job_id"] else "pending",
+        }.get(document["status"], "pending")
+        conn.execute(
+            "INSERT OR IGNORE INTO ingestion_outbox (document_id, state, queue_job_id, updated_at) "
+            "VALUES (?, ?, ?, ?)",
+            (document_id, state, document["job_id"], time.time()),
+        )
+
+
+def get_ingestion_outbox(document_id):
+    with closing(get_connection()) as conn:
+        row = conn.execute(
+            "SELECT * FROM ingestion_outbox WHERE document_id = ?",
+            (document_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def list_ingestion_outbox():
+    with closing(get_connection()) as conn:
+        rows = conn.execute(
+            "SELECT * FROM ingestion_outbox WHERE "
+            "(state = 'pending' AND next_attempt_at <= ?) OR "
+            "(state = 'publishing' AND (lease_until IS NULL OR lease_until <= ?)) OR "
+            "state IN ('queued', 'running') "
+            "ORDER BY updated_at",
+            (time.time(), time.time()),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
+def claim_ingestion_outbox(document_id, lease_seconds=60):
+    now = time.time()
+    with closing(get_connection()) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT * FROM ingestion_outbox WHERE document_id = ?",
+            (document_id,),
+        ).fetchone()
+        if row is None or row["state"] not in ("pending", "publishing"):
+            conn.rollback()
+            return None
+        if row["state"] == "pending" and row["next_attempt_at"] > now:
+            conn.rollback()
+            return None
+        if row["state"] == "publishing" and row["lease_until"] and row["lease_until"] > now:
+            conn.rollback()
+            return None
+        attempts = row["attempts"]
+        job_id = row["queue_job_id"]
+        if not job_id:
+            attempts += 1
+            job_id = f"ingest-{document_id}-{attempts}"
+        conn.execute(
+            "UPDATE ingestion_outbox SET state = 'publishing', attempts = ?, queue_job_id = ?, "
+            "lease_until = ?, updated_at = ? WHERE document_id = ?",
+            (attempts, job_id, now + lease_seconds, now, document_id),
+        )
+        conn.commit()
+        return {"document_id": document_id, "attempts": attempts, "queue_job_id": job_id}
+
+
+def release_ingestion_outbox(document_id, error):
+    with closing(get_connection()) as conn, conn:
+        row = conn.execute(
+            "SELECT attempts FROM ingestion_outbox WHERE document_id = ?",
+            (document_id,),
+        ).fetchone()
+        if row is None:
+            return
+        delay = min(2 ** min(max(row["attempts"] - 1, 0), 8), 300)
+        conn.execute(
+            "UPDATE ingestion_outbox SET state = 'pending', lease_until = NULL, next_attempt_at = ?, "
+            "last_error = ?, updated_at = ? WHERE document_id = ? AND state = 'publishing'",
+            (time.time() + delay, str(error)[:500], time.time(), document_id),
+        )
+
+
+def requeue_missing_ingestion(document_id):
+    with closing(get_connection()) as conn, conn:
+        conn.execute(
+            "UPDATE documents SET status = 'uploaded', job_id = NULL "
+            "WHERE document_id = ? AND status IN ('queued', 'processing')",
+            (document_id,),
+        )
+        conn.execute(
+            "UPDATE ingestion_outbox SET state = 'pending', queue_job_id = NULL, lease_until = NULL, "
+            "next_attempt_at = 0, updated_at = ? WHERE document_id = ? "
+            "AND state IN ('queued', 'running', 'publishing')",
+            (time.time(), document_id),
+        )
+
+
+def mark_ingestion_enqueued(document_id, job_id):
+    now = time.time()
+    with closing(get_connection()) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(
+            "UPDATE documents SET status = CASE WHEN status = 'uploaded' THEN 'queued' ELSE status END, "
+            "job_id = ? WHERE document_id = ?",
+            (job_id, document_id),
+        )
+        conn.execute(
+            "UPDATE ingestion_outbox SET state = CASE WHEN state IN ('running', 'completed', 'failed') "
+            "THEN state ELSE 'queued' END, queue_job_id = ?, lease_until = NULL, last_error = NULL, updated_at = ? "
+            "WHERE document_id = ?",
+            (job_id, now, document_id),
+        )
+        conn.commit()
+
+
 #status of the document can be 'uploaded', 'processing', 'processed', 'error'
 def update_status(document_id, status, job_id=None, error=None):
     with closing(get_connection()) as conn:
@@ -259,6 +413,19 @@ def update_status(document_id, status, job_id=None, error=None):
                 error = ?
             WHERE document_id = ?
         """, (status, job_id, error, document_id))
+            outbox_state = {
+                "uploaded": "pending",
+                "queued": "queued",
+                "processing": "running",
+                "completed": "completed",
+                "failed": "failed",
+            }.get(status)
+            if outbox_state is not None:
+                conn.execute(
+                    "UPDATE ingestion_outbox SET state = ?, lease_until = NULL, updated_at = ? "
+                    "WHERE document_id = ?",
+                    (outbox_state, time.time(), document_id),
+                )
 
 #retrieve document by id
 def get_document(document_id):

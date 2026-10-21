@@ -194,7 +194,7 @@ class MiddlewareTests(ApiTestBase):
     def test_upload_gets_the_larger_cap(self):
         self.cfg = settings(max_body_bytes=2048, max_upload_bytes=1 << 20)
         with patch("app.api.routes.ingestion_queue"), patch("app.api.routes.register_upload", return_value=None), \
-                patch("app.api.routes.update_status"), patch("app.api.routes.set_job_id"), \
+                patch("app.api.routes.submit_document", return_value="job-1"), \
                 patch("app.api.routes.UPLOAD_DIR", __import__("pathlib").Path(__import__("tempfile").mkdtemp())):
             r = self.client.post("/documents", headers=self.H, files={"file": ("a.pdf", b"%PDF-1.7 " + b"x" * 10_000)})
         self.assertEqual(r.status_code, 202)

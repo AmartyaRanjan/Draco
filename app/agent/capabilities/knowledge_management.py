@@ -136,14 +136,25 @@ async def ingest_approved_source(a: IngestIn, ctx):
     title = src["title"] or "web source"
     header = [f"Source URL: {src['url']}", f"Retrieved: {time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime(src['created_at']))} UTC",
               f"Content SHA-256: {src['content_hash']}", f"Approved source_id: {src['source_id']}"]
+    import asyncio
+
+    async def renew_claim():
+        while True:
+            await asyncio.sleep(60)
+            if not await asyncio.to_thread(svc.store.renew_claim, job["job_id"]):
+                return
+
+    renewal = asyncio.create_task(renew_claim())
     try:
-        import asyncio
         pdf = await asyncio.to_thread(A.text_to_pdf, title, header, src["content_text"])
         res = await asyncio.to_thread(ingest, ctx.user_id, f"{title[:80]} ({src['preview']['domain']}).pdf", pdf)
     except Exception as exc:
         svc.store.update_job(job["job_id"], status="failed", error=type(exc).__name__)
         svc.store.set_source_status(a.source_id, "failed")
         raise CapabilityError(ErrorCode.upstream_error, "Could not submit the source to the ingestion queue.", retryable=True) from exc
+    finally:
+        renewal.cancel()
+        await asyncio.gather(renewal, return_exceptions=True)
     svc.store.update_job(job["job_id"], document_id=res["document_id"], rq_job_id=res.get("job_id"), status=res["status"])
     svc.store.set_source_status(a.source_id, "ingesting" if res["status"] != "completed" else "ingested")
     return Outcome(IngestOut(source_id=a.source_id, job_id=job["job_id"], document_id=res["document_id"],

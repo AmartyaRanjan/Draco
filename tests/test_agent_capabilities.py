@@ -441,6 +441,21 @@ class IngestionApprovalTests(unittest.TestCase):
         run(both())
         self.assertEqual(len(self.submitted), 1)
 
+    def test_expired_claim_is_recovered_without_creating_a_second_job(self):
+        sid = self.propose().data["source_id"]
+        self.svc.store.approve_source(sid, "alice")
+        key = "recovery-test"
+        job, created = self.svc.store.claim_job(sid, key)
+        self.assertTrue(created)
+        self.svc.store._write("UPDATE ingestion_jobs SET lease_until=0 WHERE job_id=?", (job["job_id"],))
+
+        recovered = run(call("ingest_approved_source", {"source_id": sid}, self.ctx))
+        repeated = run(call("ingest_approved_source", {"source_id": sid}, self.ctx))
+
+        self.assertEqual(recovered.data["job_id"], job["job_id"])
+        self.assertTrue(repeated.data["reused_job"])
+        self.assertEqual(len(self.submitted), 1)
+
     def test_failed_submission_can_be_retried_with_same_job(self):
         sid = self.propose().data["source_id"]
         self.svc.store.approve_source(sid, "alice")
