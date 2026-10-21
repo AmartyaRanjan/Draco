@@ -1,0 +1,10 @@
+{"id": "explicit-math", "input": {"a": 1, "b": 2}, "agent": "math", "expect_path": ["math"], "expect_status": "completed"}
+{"id": "cap-summarize", "input": "x", "require": ["summarize"], "expect_path": ["writer"], "expect_status": "completed"}
+{"id": "cap-calc", "input": {"a": 3, "b": 4}, "require": ["calc"], "expect_path": ["math"], "expect_status": "completed"}
+{"id": "cap-least-extra", "input": "x", "require": ["write"], "expect_path": ["writer"], "expect_status": "completed"}
+{"id": "handoff-chain", "input": "2+3", "agent": "triage", "expect_path": ["triage", "math"], "expect_status": "completed"}
+{"id": "unknown-agent", "input": "x", "agent": "ghost", "expect_status": "failed", "expect_error": "routing"}
+{"id": "no-route", "input": "x", "require": ["teleport"], "expect_status": "failed", "expect_error": "routing"}
+{"id": "bad-handoff", "input": "x", "agent": "bad", "expect_status": "failed", "expect_error": "routing"}
+{"id": "loop", "input": "x", "agent": "ping", "expect_status": "failed", "expect_error": "routing"}
+{"id": "denied-agent", "input": {"a": 1, "b": 1}, "agent": "math", "allowed_agents": ["router", "writer"], "expect_status": "failed", "expect_error": "policy"}
