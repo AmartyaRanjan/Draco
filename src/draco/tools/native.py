@@ -6,11 +6,12 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from app.agent.contracts import CapabilityError
+from app.agent.contracts import CapabilityError, ErrorCode
 from app.agent.registry import Capability, CapabilityContext, CapabilityRegistry
 from pydantic import BaseModel, ConfigDict
 
 from draco.core.context import ExecutionContext
+from draco.core.errors import PolicyViolation
 
 
 class NoArgs(BaseModel):
@@ -33,13 +34,23 @@ def native_tool(registry: CapabilityRegistry, *, name: str, description: str, in
         async def add(args: AddArgs, ctx: ExecutionContext) -> dict: return {"sum": args.a + args.b}
     Raise `app.agent.contracts.CapabilityError(code, message, retryable)` for expected failures."""
 
+    required_permissions = frozenset(permissions)
+
     def deco(fn: Callable[[Any, ExecutionContext], Awaitable[Any]]) -> Capability:
         async def handler(args: BaseModel, cap_ctx: CapabilityContext) -> BaseModel | dict:
-            out = await fn(args, cap_ctx.scratch["draco_ctx"])
+            ctx = cap_ctx.scratch.get("draco_ctx")
+            if not isinstance(ctx, ExecutionContext):
+                raise CapabilityError(ErrorCode.denied, "Native tool execution requires an authorized context.")
+            try:
+                ctx.policy.authorize_tool(name, required_permissions, requires_approval=requires_approval)
+            except PolicyViolation as exc:
+                code = ErrorCode.approval_required if "requires approval" in exc.message else ErrorCode.denied
+                raise CapabilityError(code, exc.message) from exc
+            out = await fn(args, ctx)
             return out if isinstance(out, (BaseModel, dict)) else {"result": out}
         cap = Capability(name=name, group=group, description=description, input_model=input_model,
                          output_model=output_model, handler=handler, version=version,
-                         permissions=frozenset(permissions), mutates_state=mutates_state,
+                         permissions=required_permissions, mutates_state=mutates_state,
                          requires_approval=requires_approval, parallel_safe=parallel_safe,
                          untrusted_output=untrusted_output, llm_exposed=llm_exposed, timeout_s=timeout_s,
                          max_output_chars=max_output_chars)
