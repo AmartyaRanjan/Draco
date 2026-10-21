@@ -1,6 +1,5 @@
 """Agent tools. The orchestrator validates arguments, enforces limits and writes the trace."""
 import asyncio
-from contextlib import closing
 from dataclasses import dataclass
 from typing import Awaitable, Callable
 
@@ -39,13 +38,7 @@ async def _search(args: SearchArgs, ctx: ToolContext) -> tuple[str, str]:
 
 
 async def _list(args: ListArgs, ctx: ToolContext) -> tuple[str, str]:
-    def q():
-        # closing() is required: sqlite3.Connection as a context manager only
-        # commits/rolls back, it never closes.
-        with closing(registry.get_connection()) as c:
-            return [dict(r) for r in c.execute(
-                "SELECT document_id, filename, status FROM documents ORDER BY created_at DESC LIMIT 50")]
-    rows = await asyncio.to_thread(q)
+    rows = await asyncio.to_thread(registry.list_documents_for_owner, ctx.user_id, 50)
     text = "\n".join(f"{r['document_id']} | {r['filename']} | {r['status']}" for r in rows) or "No documents."
     return text, f"Listed {len(rows)} documents"
 

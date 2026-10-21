@@ -1,8 +1,10 @@
 """HTTP platform layer: rate limiting, auth lockout, body caps, request ids, health, metrics, LLM admission."""
 import asyncio
 import dataclasses
+import tempfile
 import unittest
 from contextlib import ExitStack
+from pathlib import Path
 from unittest.mock import patch
 
 from fastapi import HTTPException
@@ -11,6 +13,7 @@ from fastapi.testclient import TestClient
 from app.api import chat, health
 from app.core import concurrency, ratelimit
 from app.core.http_settings import PlatformSettings, get_platform_settings
+from app.db import registry
 from app.main import app
 from tests.test_inference import isettings
 
@@ -94,6 +97,10 @@ class ApiTestBase(unittest.TestCase):
     def setUp(self):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.stack.enter_context(patch.object(registry, "DB_PATH", Path(self.tmp.name) / "documents.db"))
+        registry.init_db()
         self.cfg = settings()
         for mod in ("app.core.ratelimit", "app.core.concurrency", "app.core.middleware", "app.api.health"):
             self.stack.enter_context(patch(f"{mod}.get_platform_settings", lambda: self.cfg))
@@ -193,7 +200,7 @@ class MiddlewareTests(ApiTestBase):
         self.assertEqual(r.status_code, 202)
 
     def test_unhandled_exception_is_a_clean_500_with_request_id(self):
-        with patch("app.api.routes.get_document", side_effect=RuntimeError("boom secret")):
+        with patch("app.api.routes.get_document_for_owner", side_effect=RuntimeError("boom secret")):
             r = TestClient(app, raise_server_exceptions=False).get("/documents/x", headers=self.H)
         self.assertEqual(r.status_code, 500)
         self.assertNotIn("boom", r.text)

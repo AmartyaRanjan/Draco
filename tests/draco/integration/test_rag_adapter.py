@@ -1,6 +1,8 @@
 """Existing RetrievalService + generator contracts through the harness, with the app's own fakes."""
 import asyncio
 
+import pytest
+from app.db import registry
 from app.retrieval.context import TokenCounter
 from app.retrieval.generator import GenerationResult, extract_citations
 from app.retrieval.schema import RetrievalError
@@ -39,10 +41,18 @@ def harness(service):
     return h
 
 
-async def test_retrieval_through_harness_uses_execution_id_and_traces():
+@pytest.fixture
+def owned_documents(tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "DB_PATH", tmp_path / "documents.db")
+    registry.init_db()
+    for document_id in ("d1", "d2", "d3"):
+        registry.create_document(document_id, f"{document_id}.pdf", f"/{document_id}", "tester")
+
+
+async def test_retrieval_through_harness_uses_execution_id_and_traces(owned_documents):
     s = svc()
     h = harness(s)
-    r = await h.run("retrieve", "what is x", session_id="S")
+    r = await h.run("retrieve", "what is x", session_id="S", user_id="tester")
     assert r.status == Status.completed
     assert r.output["trace"]["request_id"] == r.execution_id  # one identity across both tracing layers
     assert [i["chunk_id"] for i in r.output["items"]][0] in {"c1", "c2", "c3"}
@@ -50,53 +60,53 @@ async def test_retrieval_through_harness_uses_execution_id_and_traces():
     events = [e["event"] for e in h.tracer.trace(r.execution_id)]
     assert "retrieval.after" in events
     # the service is still directly callable, outside the harness
-    direct = await s.retrieve("what is x")
+    direct = await s.retrieve("what is x", principal="tester")
     assert len(direct.context.items) == len(r.output["items"])
 
 
-async def test_rag_model_call_is_budgeted_and_evented_and_usage_recorded():
+async def test_rag_model_call_is_budgeted_and_evented_and_usage_recorded(owned_documents):
     gen = Gen()
     h = harness(svc(gen=gen))
-    r = await h.run("rag", {"query": "q"})
+    r = await h.run("rag", {"query": "q"}, user_id="tester")
     assert r.output["answer"] == "answer [S1]" and r.output["citations"][0]["filename"] == "f.pdf"
     assert r.usage.model_calls == 1 and r.usage.tokens == 42
-    r = await h.run("rag", "q", limits=BudgetLimits(max_model_calls=1, max_tokens=10))
+    r = await h.run("rag", "q", user_id="tester", limits=BudgetLimits(max_model_calls=1, max_tokens=10))
     assert r.status == Status.budget_exhausted and r.error.details["resource"] == "tokens"
 
 
-async def test_abstains_without_model_call_when_no_evidence_or_no_generator():
+async def test_abstains_without_model_call_when_no_evidence_or_no_generator(owned_documents):
     gen = Gen()
     h = harness(svc(FakeRetriever([], stage="q"), FakeRetriever([], stage="o"), gen))
-    r = await h.run("rag", "q")
+    r = await h.run("rag", "q", user_id="tester")
     assert r.status == Status.completed and r.output["abstained"] == "no_evidence" and gen.calls == 0
     h = harness(svc())
-    assert (await h.run("rag", "q")).output["abstained"] == "generator_not_configured"
+    assert (await h.run("rag", "q", user_id="tester")).output["abstained"] == "generator_not_configured"
 
 
-async def test_failure_modes_map_to_typed_errors():
+async def test_failure_modes_map_to_typed_errors(owned_documents):
     h = harness(svc(FakeRetriever(D, fail=True, stage="q"), FakeRetriever(L, fail=True, stage="o")))
-    r = await h.run("retrieve", "q")
+    r = await h.run("retrieve", "q", user_id="tester")
     assert r.status == Status.failed and r.error.code == "provider" and r.error.retryable  # 503, both retrievers down
-    r = await harness(svc()).run("retrieve", "")
+    r = await harness(svc()).run("retrieve", "", user_id="tester")
     assert r.error.code == "contract"  # 422 from validation
-    r = await harness(svc(gen=Gen(RetrievalError("Generator timed out", "llm", 504)))).run("rag", "q")
+    r = await harness(svc(gen=Gen(RetrievalError("Generator timed out", "llm", 504)))).run("rag", "q", user_id="tester")
     assert r.status == Status.timeout and r.error.code == "timeout"
-    r = await harness(svc()).run("retrieve", 123)
+    r = await harness(svc()).run("retrieve", 123, user_id="tester")
     assert r.error.code == "contract"
     assert map_app_error(ValueError("x")) is None
 
 
-async def test_degraded_retrieval_still_completes_and_reports():
+async def test_degraded_retrieval_still_completes_and_reports(owned_documents):
     h = harness(svc(FakeRetriever(D, stage="q"), FakeRetriever(L, fail=True, stage="o")))
-    r = await h.run("retrieve", "q")
+    r = await h.run("retrieve", "q", user_id="tester")
     assert r.status == Status.completed and r.output["degraded"] == ["bm25"]
 
 
-async def test_cancellation_and_timeout_propagate_into_retrieval():
+async def test_cancellation_and_timeout_propagate_into_retrieval(owned_documents):
     h = harness(svc(FakeRetriever(D, delay=5, stage="q"), FakeRetriever(L, delay=5, stage="o")))
-    r = await h.run("retrieve", "q", timeout_s=0.1)
+    r = await h.run("retrieve", "q", user_id="tester", timeout_s=0.1)
     assert r.status == Status.timeout
-    t = asyncio.create_task(h.run("retrieve", "q"))
+    t = asyncio.create_task(h.run("retrieve", "q", user_id="tester"))
     await asyncio.sleep(0.1)
     (eid,) = list(h._inflight)
     h.cancel(eid)

@@ -37,7 +37,7 @@ def ingest_pdf(user_id: str, filename: str, pdf: bytes) -> dict:
     safe = Path(filename).name
     path = UPLOAD_DIR / f"{doc_id}_{safe}"
     path.write_bytes(pdf)
-    existing = registry.register_upload(doc_id, safe, str(path.resolve()), hashlib.sha256(pdf).hexdigest())
+    existing = registry.register_upload(doc_id, safe, str(path.resolve()), hashlib.sha256(pdf).hexdigest(), user_id)
     if existing is not None:
         path.unlink(missing_ok=True)
         return {"document_id": existing["document_id"], "job_id": existing["job_id"], "status": existing["status"], "duplicate": True}
@@ -124,7 +124,7 @@ def build_services(inference: InferenceSettings, retrieval, settings: AgentSetti
         summarizer=EvidenceSummarizer(build_llm_call(adapter), counter, batch_tokens=s.summary_batch_tokens, max_depth=s.summary_max_depth),
         search_provider=build_search_provider(s), fetcher=WebFetcher(s), image_provider=build_image_provider(s),
         artifact_store=ArtifactStore(s.artifact_dir, store, max_bytes=s.artifact_max_bytes, ttl_days=s.artifact_ttl_days),
-        document_lookup=registry.get_document, pages_lookup=registry.get_pages,
+        document_lookup=registry.get_document_for_owner, pages_lookup=registry.get_pages_for_owner,
         chunk_exists=chunk_exists, chunk_neighbors=chunk_neighbors, chunk_count=chunk_count, ingest_pdf=ingest_pdf)
     svc.extra["upload_dir"] = str(UPLOAD_DIR)
     return svc, adapter

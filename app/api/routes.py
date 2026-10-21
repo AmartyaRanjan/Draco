@@ -9,8 +9,8 @@ from app.api.chat import read_user, upload_user
 from app.core.queue import ingestion_queue
 from app.db.registry import (
     FAILED_STATUS,
-    get_document,
-    get_pages,
+    get_document_for_owner,
+    get_pages_for_owner,
     register_upload,
     update_status,
     set_job_id,
@@ -28,8 +28,8 @@ UPLOAD_DIR = (
 MAX_FILE_SIZE = 100 * 1024 * 1024  # 100 MB
 
 
-@router.post("/documents", status_code=202, dependencies=[Depends(upload_user)])
-async def upload_document(file: UploadFile = File(...)):
+@router.post("/documents", status_code=202)
+async def upload_document(file: UploadFile = File(...), user: str = Depends(upload_user)):
     if not file.filename:
         raise HTTPException(400, "Filename is required")
 
@@ -80,6 +80,7 @@ async def upload_document(file: UploadFile = File(...)):
             filename=safe_filename,
             file_path=str(file_path.resolve()),
             content_hash=digest.hexdigest(),
+            owner_id=user,
         )
 
         if existing is not None:
@@ -139,19 +140,20 @@ async def upload_document(file: UploadFile = File(...)):
     finally:
         await file.close()
 
-@router.get("/documents/{document_id}", dependencies=[Depends(read_user)])
-def document_status(document_id: str):
-    document = get_document(document_id)
+@router.get("/documents/{document_id}")
+def document_status(document_id: str, user: str = Depends(read_user)):
+    document = get_document_for_owner(document_id, user)
 
     if document is None:
         raise HTTPException(404, "Document not found")
 
+    document.pop("owner_id", None)
     return document
 
 
-@router.get("/documents/{document_id}/pages", dependencies=[Depends(read_user)])
-def document_pages(document_id: str):
-    if get_document(document_id) is None:
+@router.get("/documents/{document_id}/pages")
+def document_pages(document_id: str, user: str = Depends(read_user)):
+    if get_document_for_owner(document_id, user) is None:
         raise HTTPException(404, "Document not found")
 
-    return get_pages(document_id)
+    return get_pages_for_owner(document_id, user)

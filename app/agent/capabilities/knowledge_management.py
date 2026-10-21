@@ -104,7 +104,7 @@ class IngestOut(BaseModel):
 def _refresh(svc, job: dict, src: dict) -> dict:
     """Mirror the ingestion registry's status (queued/processing/completed/failed) onto our records."""
     if job.get("document_id") and svc.document_lookup:
-        doc = svc.document_lookup(job["document_id"])
+        doc = svc.document_lookup(job["document_id"], src["user_id"])
         if doc and doc["status"] != job["status"]:
             svc.store.update_job(job["job_id"], status=doc["status"], error=None if doc["status"] != "failed" else "ingestion failed")
             svc.store.set_source_status(src["source_id"], {"completed": "ingested", "failed": "failed"}.get(doc["status"], "ingesting"))
@@ -178,9 +178,10 @@ async def inspect_source_provenance(a: ProvenanceIn, ctx):
         rows = svc.store.sources_for_url(ctx.user_id, url_hash(a.url))
         src = svc.store.get_source(rows[0]["source_id"], ctx.user_id) if rows else None
     else:
-        job = svc.store._one("SELECT source_id FROM ingestion_jobs WHERE document_id=?", (a.document_id,))
+        doc = svc.document_lookup(a.document_id, ctx.user_id) if svc.document_lookup else None
+        job = svc.store._one("SELECT source_id FROM ingestion_jobs WHERE document_id=?", (a.document_id,)) if doc else None
         src = svc.store.get_source(job["source_id"], ctx.user_id) if job else None
-    doc = svc.document_lookup(a.document_id) if (a.document_id and svc.document_lookup) else None
+    doc = svc.document_lookup(a.document_id, ctx.user_id) if (a.document_id and svc.document_lookup) else None
     if src is None:
         if doc:
             return ProvenanceOut(found=True, document={"document_id": doc["document_id"], "filename": doc["filename"],
@@ -192,7 +193,7 @@ async def inspect_source_provenance(a: ProvenanceIn, ctx):
         job = _refresh(svc, job, src)
         src = svc.store.get_source(src["source_id"], ctx.user_id)  # status may have just been refreshed
     ap = svc.store.get_approval(src["source_id"], ctx.user_id)
-    d = svc.document_lookup(job["document_id"]) if (job and job.get("document_id") and svc.document_lookup) else doc
+    d = svc.document_lookup(job["document_id"], ctx.user_id) if (job and job.get("document_id") and svc.document_lookup) else doc
     return ProvenanceOut(
         found=True,
         source={k: src[k] for k in ("source_id", "url", "title", "status", "content_hash", "reason", "created_at", "expires_at")} | {"trust": src["trust"]},

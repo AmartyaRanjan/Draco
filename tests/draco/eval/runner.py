@@ -13,7 +13,9 @@ import asyncio
 import json
 import pathlib
 import sys
+import tempfile
 from typing import Any
+from unittest.mock import patch
 
 from pydantic import BaseModel
 
@@ -126,6 +128,7 @@ async def eval_termination(case: dict[str, Any]) -> list[str]:
 
 # ---- rag ---------------------------------------------------------------------------------
 async def eval_rag(case: dict[str, Any]) -> list[str]:
+    from app.db import registry
     from app.retrieval.context import TokenCounter
     from app.retrieval.generator import GenerationResult, extract_citations
     from app.retrieval.service import RetrievalService
@@ -142,12 +145,16 @@ async def eval_rag(case: dict[str, Any]) -> list[str]:
     class Gen:
         async def generate(self, q, ctx, weak):
             return GenerationResult("a [S1]", extract_citations("[S1]", ctx)[0], usage={"total_tokens": 1})
-    svc = RetrievalService(settings(), dense=retr(case["dense"], "dense", "q"), lexical=retr(case["lexical"], "bm25", "o"),
-                           reranker=FakeReranker(), counter=TokenCounter(None), generator=Gen() if case["generator"] else None,
-                           filename_lookup=lambda d: "f.pdf")
-    h = Harness(DracoSettings(default_timeout_s=5))
-    h.register("rag", rag_workload(svc))
-    r = await h.run("rag", case["query"])
+    with tempfile.TemporaryDirectory() as tmp, patch.object(registry, "DB_PATH", pathlib.Path(tmp) / "documents.db"):
+        registry.init_db()
+        registry.create_document("d1", "d1.pdf", "/d1", "eval")
+        svc = RetrievalService(
+            settings(), dense=retr(case["dense"], "dense", "q"), lexical=retr(case["lexical"], "bm25", "o"),
+            reranker=FakeReranker(), counter=TokenCounter(None),
+            generator=Gen() if case["generator"] else None, filename_lookup=lambda d: "f.pdf")
+        h = Harness(DracoSettings(default_timeout_s=5))
+        h.register("rag", rag_workload(svc))
+        r = await h.run("rag", case["query"], user_id="eval")
     if "expect_error" in case:
         return [] if r.error and r.error.code == case["expect_error"] else [f"error {r.error and r.error.code} != {case['expect_error']}"]
     errs = [] if r.ok else [f"status {r.status.value}"]

@@ -1,6 +1,8 @@
 import asyncio
+import tempfile
 import unittest
 from dataclasses import replace
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
@@ -13,6 +15,7 @@ from app.retrieval.selection import FALLBACK, PASSED, Calibrator, select
 from app.retrieval.service import RetrievalService
 from app.retrieval.settings import RetrievalSettings
 from app.retrieval.timing import Trace
+from app.db import registry
 
 
 def cand(i, text=None, **kw):
@@ -176,9 +179,19 @@ class ServiceTests(unittest.TestCase):
     D = [cand(1, dense_rank=1, dense_score=.9), cand(2, dense_rank=2, dense_score=.8)]
     L = [cand(2, bm25_rank=1, bm25_score=7.), cand(3, bm25_rank=2, bm25_score=3.)]
 
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.db_patch = patch.object(registry, "DB_PATH", Path(self.tmp.name) / "documents.db")
+        self.db_patch.start()
+        self.addCleanup(self.db_patch.stop)
+        registry.init_db()
+        for document_id in ("d1", "d2", "d3"):
+            registry.create_document(document_id, f"{document_id}.pdf", f"/{document_id}", "tester")
+
     def test_parallel_wall_clock_not_sum_and_rerank_once(self):
         s = svc(FakeRetriever(self.D, .2, stage="qdrant_query"), FakeRetriever(self.L, .2, stage="opensearch_query"))
-        out = asyncio.run(s.retrieve("q"))
+        out = asyncio.run(s.retrieve("q", principal="tester"))
         out.trace.finish()
         st = out.trace.stages
         self.assertLess(st["hybrid_retrieval"]["ms"], st["qdrant_query"]["ms"] + st["opensearch_query"]["ms"] - 100)
@@ -191,39 +204,49 @@ class ServiceTests(unittest.TestCase):
             self.assertIn(stage, st)
 
     def test_degraded_mode_and_both_fail(self):
-        out = asyncio.run(svc(FakeRetriever(fail=True), FakeRetriever(self.L)).retrieve("q"))
+        out = asyncio.run(svc(FakeRetriever(fail=True), FakeRetriever(self.L)).retrieve("q", principal="tester"))
         self.assertEqual(out.degraded, ["dense"])
         self.assertGreater(len(out.context.items), 0)
         with self.assertRaises(RetrievalError) as cm:
-            asyncio.run(svc(FakeRetriever(fail=True), FakeRetriever(fail=True)).retrieve("q"))
+            asyncio.run(svc(FakeRetriever(fail=True), FakeRetriever(fail=True)).retrieve("q", principal="tester"))
         self.assertEqual(cm.exception.stage, "hybrid_retrieval")
 
     def test_invalid_query_and_empty_candidates(self):
         with self.assertRaises(RetrievalError):
             asyncio.run(svc(FakeRetriever(), FakeRetriever()).retrieve("   "))
         gen = FakeGen()
-        out, g = asyncio.run(svc(FakeRetriever(), FakeRetriever(), gen).answer("q"))
+        out, g = asyncio.run(svc(FakeRetriever(), FakeRetriever(), gen).answer("q", principal="tester"))
         self.assertIsNone(g)
         self.assertEqual(gen.calls, [])
         self.assertEqual(out.trace.metrics["abstained"], "no_evidence")
 
     def test_generator_receives_selected_context_and_failure_is_controlled(self):
         gen = FakeGen()
-        out, g = asyncio.run(svc(FakeRetriever(self.D), FakeRetriever(self.L), gen).answer("q"))
+        out, g = asyncio.run(svc(FakeRetriever(self.D), FakeRetriever(self.L), gen).answer("q", principal="tester"))
         ctx, weak = gen.calls[0]
         self.assertEqual([e.candidate.chunk_id for e in ctx.items], [c.chunk_id for c in out.selection.selected])
         self.assertEqual(g.citations[0]["filename"], "f.pdf")
         with self.assertRaises(RetrievalError) as cm:
-            asyncio.run(svc(FakeRetriever(self.D), FakeRetriever(self.L), FakeGen(fail=True)).answer("q"))
+            asyncio.run(svc(FakeRetriever(self.D), FakeRetriever(self.L), FakeGen(fail=True)).answer("q", principal="tester"))
         self.assertEqual(cm.exception.status_code, 504)
 
     def test_timing_does_not_change_results(self):
-        a = asyncio.run(svc(FakeRetriever(self.D), FakeRetriever(self.L)).retrieve("q"))
-        b = asyncio.run(svc(FakeRetriever(self.D), FakeRetriever(self.L)).retrieve("q"))
+        a = asyncio.run(svc(FakeRetriever(self.D), FakeRetriever(self.L)).retrieve("q", principal="tester"))
+        b = asyncio.run(svc(FakeRetriever(self.D), FakeRetriever(self.L)).retrieve("q", principal="tester"))
         self.assertEqual([c.chunk_id for c in a.selection.selected], [c.chunk_id for c in b.selection.selected])
 
 
 class ApiTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.db_patch = patch.object(registry, "DB_PATH", Path(self.tmp.name) / "documents.db")
+        self.db_patch.start()
+        self.addCleanup(self.db_patch.stop)
+        registry.init_db()
+        for document_id in ("d1", "d2", "d3"):
+            registry.create_document(document_id, f"{document_id}.pdf", f"/{document_id}", "tester")
+
     def test_validation_and_error_mapping(self):
         from app.api.chat import current_user
         from app.main import app

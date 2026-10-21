@@ -36,7 +36,7 @@ class UploadRouteTests(unittest.TestCase):
 
     def upload(self, data: bytes, filename="a.pdf"):
         file = UploadFile(file=io.BytesIO(PDF + data), filename=filename)
-        return asyncio.run(routes.upload_document(file))
+        return asyncio.run(routes.upload_document(file, "alice"))
 
     def stored_files(self):
         return sorted(p.name for p in (self.root / "uploads").iterdir())
@@ -94,9 +94,9 @@ class UploadRouteTests(unittest.TestCase):
             [{"page_no": 1, "page_type": "digital", "char_count": 5, "image_count": 0,
               "large_image_count": 0, "ocr_used": 0, "reason": "usable text layer"}],
         )
-        self.assertEqual(routes.document_pages(document_id)[0]["page_type"], "digital")
+        self.assertEqual(routes.document_pages(document_id, "alice")[0]["page_type"], "digital")
         with self.assertRaises(HTTPException):
-            routes.document_pages("missing")
+            routes.document_pages("missing", "alice")
 
 
 if __name__ == "__main__":
