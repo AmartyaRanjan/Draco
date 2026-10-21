@@ -1,12 +1,16 @@
 .venv/
 .env
+.env.*
 __pycache__/
 *.py[cod]
 documents/
-app/storage/conversations.db
-eval_results/*.ragas.jsonl
-app/storage/agent.db*
+app/storage/uploads/
+app/storage/*.db
+app/storage/*.db-*
+app/storage/*.sqlite
+app/storage/*.sqlite-*
 app/storage/artifacts/
+eval_results/*.ragas.jsonl
 eval_results/*.raw.json
 eval_results/*.log
 

@@ -24,6 +24,9 @@ dev = ["pytest>=8", "ruff", "mypy", "pip-audit"]
 where = ["src", "."]
 include = ["draco*", "app*"]
 
+[tool.setuptools.exclude-package-data]
+app = ["storage/**"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src", "."]

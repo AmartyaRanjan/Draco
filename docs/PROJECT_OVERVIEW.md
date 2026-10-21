@@ -76,7 +76,7 @@ These are the most important items from the existing documents. The full lists a
 5. **Agent graph state is in memory.** A restart loses an in-flight run, and approval is not a LangGraph `interrupt`.
 6. **Single-host data stores,** with no replication or backup.
 7. **The Docker image and CI workflow have never been built or run.**
-8. **Personal PDFs and `documents.db` are tracked in git** under `app/storage/`.
+8. **Runtime uploads and local databases were committed in repository history.** The files are excluded from the current tree and future commits, but remain available in published Git history until repository administrators coordinate history cleanup and cache remediation. Treat previously committed contents as exposed and rotate any credentials they may have contained.
 
 ---
 
@@ -154,7 +154,7 @@ The existing FastAPI service becomes the first consumer of the package, which ke
 Phases are ordered by dependency. Each ends with something that works, so the package never sits half-built.
 
 ### Phase 0: housekeeping (before any refactor)
-- Untrack `app/storage/uploads/*.pdf` and `*.db` from git and extend `.gitignore`.
+- Keep runtime uploads and local databases out of Git; they are now ignored and excluded from package data. Existing public Git history still requires coordinated cleanup.
 - Replace the placeholder `README.md` with a pointer to this file.
 - Build the Docker image and run the CI workflow once, and fix what breaks.
 - Consolidate the duplicate `enable_thinking` mapping in `app/inference/client.py` into `app/agent/runtime.py`.
