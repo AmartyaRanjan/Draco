@@ -68,7 +68,7 @@ class KnowledgeTests(unittest.TestCase):
 
     def test_metadata_hides_paths_and_checks_scope(self):
         svc = make_services()
-        svc.extra["docs"]["d1"] = {"document_id": "d1", "filename": "a.pdf", "status": "completed", "file_path": "/secret/a.pdf",
+        svc.extra["docs"]["d1"] = {"document_id": "d1", "owner_id": "alice", "filename": "a.pdf", "status": "completed", "file_path": "/secret/a.pdf",
                                    "content_hash": "abc" * 20, "error": "trace at /secret", "created_at": "t"}
         async def count(d): return 12
         svc.chunk_count = count
@@ -83,13 +83,17 @@ class KnowledgeTests(unittest.TestCase):
         self.assertEqual(run(call("get_document_metadata", {"document_id": "a/../b"}, ctx_for(svc))).error.code, ErrorCode.invalid_input)
 
     def test_expand_adds_neighbors(self):
+        svc = make_services()
+        svc.extra["docs"]["d1"] = {"document_id": "d1", "owner_id": "alice"}
         async def nb(d, c, b, a):
             return [{"document_id": d, "chunk_id": "c1", "text": "before"}, {"document_id": d, "chunk_id": c, "text": "mid"}]
-        ctx = ctx_for(make_services(chunk_neighbors=nb))
+        svc.chunk_neighbors = nb
+        ctx = ctx_for(svc)
         r = run(call("expand_document_context", {"document_id": "d1", "chunk_id": "c2"}, ctx))
         self.assertEqual(len(r.data["items"]), 2)
         async def none(*a): return None
-        r = run(call("expand_document_context", {"document_id": "d1", "chunk_id": "c9"}, ctx_for(make_services(chunk_neighbors=none))))
+        svc.chunk_neighbors = none
+        r = run(call("expand_document_context", {"document_id": "d1", "chunk_id": "c9"}, ctx_for(svc)))
         self.assertEqual(r.error.code, ErrorCode.not_found)
 
     def test_rewrite_is_deterministic_and_skips_previous(self):
@@ -371,7 +375,8 @@ class IngestionApprovalTests(unittest.TestCase):
         self.submitted = []
         self.svc = make_services(ingest_pdf=self._ingest)
         self.svc.fetcher = fetcher(lambda r: httpx.Response(200, headers={"content-type": "text/html"}, text=HTML))
-        self.svc.extra["docs"]["doc-1"] = {"document_id": "doc-1", "filename": "x.pdf", "status": "queued", "file_path": "/x"}
+        self.svc.extra["docs"]["doc-1"] = {"document_id": "doc-1", "owner_id": "alice", "filename": "x.pdf",
+                                           "status": "queued", "file_path": "/x"}
         self.ctx = ctx_for(self.svc)
         f = run(call("fetch_webpage", {"url": "https://example.org/report"}, self.ctx))
         self.pid = f.data["page_id"]
@@ -436,6 +441,21 @@ class IngestionApprovalTests(unittest.TestCase):
         run(both())
         self.assertEqual(len(self.submitted), 1)
 
+    def test_expired_claim_is_recovered_without_creating_a_second_job(self):
+        sid = self.propose().data["source_id"]
+        self.svc.store.approve_source(sid, "alice")
+        key = "recovery-test"
+        job, created = self.svc.store.claim_job(sid, key)
+        self.assertTrue(created)
+        self.svc.store._write("UPDATE ingestion_jobs SET lease_until=0 WHERE job_id=?", (job["job_id"],))
+
+        recovered = run(call("ingest_approved_source", {"source_id": sid}, self.ctx))
+        repeated = run(call("ingest_approved_source", {"source_id": sid}, self.ctx))
+
+        self.assertEqual(recovered.data["job_id"], job["job_id"])
+        self.assertTrue(repeated.data["reused_job"])
+        self.assertEqual(len(self.submitted), 1)
+
     def test_failed_submission_can_be_retried_with_same_job(self):
         sid = self.propose().data["source_id"]
         self.svc.store.approve_source(sid, "alice")
@@ -473,7 +493,9 @@ class IngestionApprovalTests(unittest.TestCase):
 
     def test_provenance_of_unknown_and_direct_documents(self):
         self.assertEqual(run(call("inspect_source_provenance", {"source_id": "nonexistent1"}, self.ctx)).status, "empty")
-        r = run(call("inspect_source_provenance", {"document_id": "doc-1"}, self.ctx))
+        self.svc.extra["docs"]["doc-2"] = {"document_id": "doc-2", "owner_id": "alice",
+                                           "filename": "direct.pdf", "status": "completed"}
+        r = run(call("inspect_source_provenance", {"document_id": "doc-2"}, self.ctx))
         self.assertIn("direct upload", r.data["document"]["origin"])
         self.assertEqual(run(call("inspect_source_provenance", {}, self.ctx)).error.code, ErrorCode.invalid_input)
 
@@ -642,7 +664,7 @@ class FileAnalysisTests(unittest.TestCase):
         (self.tmp / "uploads").mkdir()
         self.csv = self.tmp / "uploads" / "d_data.csv"
         self.csv.write_text("name,score\na,1\nb,3\nc,\n")
-        self.svc.extra["docs"]["d1"] = {"document_id": "d1", "filename": "data.csv", "status": "uploaded", "file_path": str(self.csv)}
+        self.svc.extra["docs"]["d1"] = {"document_id": "d1", "owner_id": "alice", "filename": "data.csv", "status": "uploaded", "file_path": str(self.csv)}
         self.ctx = ctx_for(self.svc)
 
     def test_csv_statistics(self):
@@ -657,25 +679,25 @@ class FileAnalysisTests(unittest.TestCase):
         from openpyxl import Workbook
         wb = Workbook(); ws = wb.active; ws.append(["x", "y"]); ws.append([1, 2]); ws.append([3, 4])
         p = self.tmp / "uploads" / "t.xlsx"; wb.save(p)
-        self.svc.extra["docs"]["d2"] = {"document_id": "d2", "filename": "t.xlsx", "status": "uploaded", "file_path": str(p)}
+        self.svc.extra["docs"]["d2"] = {"document_id": "d2", "owner_id": "alice", "filename": "t.xlsx", "status": "uploaded", "file_path": str(p)}
         r = run(call("analyze_uploaded_file", {"document_id": "d2", "analysis": "statistics"}, self.ctx))
         self.assertEqual(r.data["columns"][1]["max"], 4.0)
         p = self.tmp / "uploads" / "t.pdf"; p.write_bytes(A.render_pdf("T", [{"heading": "H", "paragraphs": ["hello world"]}], []))
-        self.svc.extra["docs"]["d3"] = {"document_id": "d3", "filename": "t.pdf", "status": "uploaded", "file_path": str(p)}
+        self.svc.extra["docs"]["d3"] = {"document_id": "d3", "owner_id": "alice", "filename": "t.pdf", "status": "uploaded", "file_path": str(p)}
         self.assertEqual(run(call("analyze_uploaded_file", {"document_id": "d3"}, self.ctx)).data["overview"]["pages"], 1)
         p = self.tmp / "uploads" / "t.docx"; p.write_bytes(A.render_docx("T", [{"heading": "H", "paragraphs": ["x"]}], []))
-        self.svc.extra["docs"]["d4"] = {"document_id": "d4", "filename": "t.docx", "status": "uploaded", "file_path": str(p)}
+        self.svc.extra["docs"]["d4"] = {"document_id": "d4", "owner_id": "alice", "filename": "t.docx", "status": "uploaded", "file_path": str(p)}
         self.assertEqual(run(call("analyze_uploaded_file", {"document_id": "d4"}, self.ctx)).data["overview"]["tables"], 0)
 
     def test_outside_upload_dir_unsupported_and_corrupt_and_too_large(self):
         outside = self.tmp / "secret.csv"; outside.write_text("a\n1\n")
-        self.svc.extra["docs"]["d5"] = {"document_id": "d5", "filename": "s.csv", "status": "uploaded", "file_path": str(outside)}
+        self.svc.extra["docs"]["d5"] = {"document_id": "d5", "owner_id": "alice", "filename": "s.csv", "status": "uploaded", "file_path": str(outside)}
         self.assertEqual(run(call("analyze_uploaded_file", {"document_id": "d5"}, self.ctx)).error.code, ErrorCode.not_found)
         exe = self.tmp / "uploads" / "x.exe"; exe.write_bytes(b"MZ")
-        self.svc.extra["docs"]["d6"] = {"document_id": "d6", "filename": "x.exe", "status": "uploaded", "file_path": str(exe)}
+        self.svc.extra["docs"]["d6"] = {"document_id": "d6", "owner_id": "alice", "filename": "x.exe", "status": "uploaded", "file_path": str(exe)}
         self.assertEqual(run(call("analyze_uploaded_file", {"document_id": "d6"}, self.ctx)).error.code, ErrorCode.invalid_input)
         bad = self.tmp / "uploads" / "bad.xlsx"; bad.write_bytes(b"not a zip")
-        self.svc.extra["docs"]["d7"] = {"document_id": "d7", "filename": "b.xlsx", "status": "uploaded", "file_path": str(bad)}
+        self.svc.extra["docs"]["d7"] = {"document_id": "d7", "owner_id": "alice", "filename": "b.xlsx", "status": "uploaded", "file_path": str(bad)}
         self.assertEqual(run(call("analyze_uploaded_file", {"document_id": "d7"}, self.ctx)).error.code, ErrorCode.invalid_input)
         self.svc.settings = asettings(analysis_max_bytes=5)
         self.assertEqual(run(call("analyze_uploaded_file", {"document_id": "d1"}, self.ctx)).error.code, ErrorCode.limit_exceeded)

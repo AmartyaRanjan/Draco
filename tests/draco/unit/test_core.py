@@ -67,6 +67,8 @@ def test_budget_counters():
 
 
 def test_policy():
+    with pytest.raises(PolicyViolation):
+        Policy().authorize_tool("anything")
     p = Policy(permissions=frozenset({"read"}), denied_tools=frozenset({"bad"}),
                allowed_tools=frozenset({"ok", "write", "bad", "appr"}))
     p.authorize_tool("ok")

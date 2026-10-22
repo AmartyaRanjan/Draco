@@ -69,6 +69,41 @@ class DuplicateTests(RegistryTestCase):
         self.assertEqual(count, 1)
 
 
+class OwnershipTests(RegistryTestCase):
+    def test_owner_queries_fail_closed_and_client_ids_only_narrow(self):
+        registry.create_document("alice-doc", "a.pdf", "/a", "alice")
+        registry.create_document("bob-doc", "b.pdf", "/b", "bob")
+        registry.create_document("legacy-doc", "l.pdf", "/l")
+
+        self.assertEqual(registry.list_document_ids_for_owner("alice"), ["alice-doc"])
+        self.assertEqual(registry.list_document_ids_for_owner("alice", ["bob-doc", "alice-doc", "legacy-doc"]), ["alice-doc"])
+        self.assertEqual(registry.list_document_ids_for_owner(None), [])
+        self.assertEqual(registry.list_documents_for_owner("alice"), [
+            {"document_id": "alice-doc", "filename": "a.pdf", "status": "uploaded"},
+        ])
+        self.assertEqual(registry.list_documents_for_owner(None), [])
+        self.assertIsNone(registry.get_document_for_owner("bob-doc", "alice"))
+        self.assertEqual(registry.get_pages_for_owner("legacy-doc", "alice"), [])
+        page = {"page_no": 1, "page_type": "digital", "char_count": 1, "image_count": 0,
+                "large_image_count": 0, "ocr_used": 0, "reason": "text"}
+        registry.save_pages("bob-doc", [page])
+        self.assertEqual(registry.get_pages_for_owner("bob-doc", "alice"), [])
+        self.assertEqual(registry.get_pages_for_owner("bob-doc", "bob")[0]["page_no"], 1)
+
+    def test_same_content_is_not_deduplicated_across_owners(self):
+        self.assertIsNone(registry.register_upload("alice-doc", "a.pdf", "/a", "same", "alice"))
+        self.assertIsNone(registry.register_upload("bob-doc", "b.pdf", "/b", "same", "bob"))
+        self.assertEqual(registry.get_document_for_owner("bob-doc", "bob")["document_id"], "bob-doc")
+        self.assertIsNone(registry.get_document_for_owner("bob-doc", "alice"))
+
+    def test_legacy_assignment_requires_expected_count(self):
+        registry.create_document("legacy-doc", "l.pdf", "/l")
+        with self.assertRaises(ValueError):
+            registry.assign_unowned_documents("alice", 0)
+        self.assertEqual(registry.assign_unowned_documents("alice", 1), 1)
+        self.assertEqual(registry.list_document_ids_for_owner("alice"), ["legacy-doc"])
+
+
 class MigrationTests(unittest.TestCase):
     def test_init_db_adds_low_yield_columns_to_existing_pages_table(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -119,6 +154,7 @@ class MigrationTests(unittest.TestCase):
 
                 old = registry.get_document("old")
                 self.assertIsNone(old["content_hash"])  # old rows are kept, just unhashed
+                self.assertIsNone(old["owner_id"])  # legacy rows are never assigned an arbitrary owner
                 self.assertIsNone(registry.register_upload("new", "n.pdf", "/n.pdf", "h"))
 
 

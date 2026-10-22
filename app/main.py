@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -25,8 +26,24 @@ async def lifespan(app: FastAPI):
     # Fail at boot, not on the first request: bad limits, missing API keys, unsafe production flags.
     p.validate(auth_disabled=get_inference_settings().auth_disabled)
     init_db()
+    from app.core.queue import ingestion_queue
+    from app.ingestion.dispatch import reconcile_ingestion_outbox
+
+    async def reconcile():
+        while True:
+            try:
+                await asyncio.to_thread(reconcile_ingestion_outbox, ingestion_queue)
+            except Exception:
+                logger.exception("ingestion_outbox_reconciliation_failed")
+            await asyncio.sleep(30)
+
+    reconciliation_task = asyncio.create_task(reconcile())
     logger.info("startup", extra={"env": p.env, "rate_limit": p.rate_limit_enabled, "cors_origins": list(p.cors_origins)})
-    yield
+    try:
+        yield
+    finally:
+        reconciliation_task.cancel()
+        await asyncio.gather(reconciliation_task, return_exceptions=True)
     logger.info("shutdown")
 
 

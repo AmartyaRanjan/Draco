@@ -36,14 +36,14 @@ class ToolRuntime:
         self.max_attempts, self.retry_delay = max_attempts, retry_delay
 
     def specs(self, ctx: ExecutionContext, *, groups: set[str] | None = None) -> list[dict[str, Any]]:
-        """Tool specs this execution may see. Least privilege: with no explicit allow-list in the
-        policy nothing is exposed, so no agent sees every registered tool by default."""
+        """Tool specs this execution may see. No tool is exposed without an explicit allow-list."""
         allowed = ctx.policy.allowed_tools
         if allowed is None:
             return []
         out = []
         for cap in self.registry.all():
-            if cap.name not in allowed or cap.name in ctx.policy.denied_tools or not cap.llm_exposed:
+            if (cap.name not in allowed or cap.name in ctx.policy.denied_tools or not cap.llm_exposed
+                    or (cap.requires_approval and not ctx.policy.allow_approval_required)):
                 continue
             if groups is not None and cap.group not in groups:
                 continue

@@ -31,7 +31,7 @@ class AgentApiTests(unittest.TestCase):
             [ai("Quarterly revenue grew 12 percent [S1].")], retrieval=FakeRetrieval([cand(1, "Quarterly revenue grew 12 percent in 2023.")]),
             fetcher=fetcher(lambda q: httpx.Response(200, headers={"content-type": "text/html"}, text=HTML)),
             ingest_pdf=lambda *a: self.ingested.append(a) or {"document_id": "doc-9", "job_id": "rq-9", "status": "queued", "duplicate": False})
-        self.svc.extra["docs"]["doc-9"] = {"document_id": "doc-9", "filename": "x.pdf", "status": "queued", "file_path": "/x"}
+        self.svc.extra["docs"]["doc-9"] = {"document_id": "doc-9", "owner_id": "alice", "filename": "x.pdf", "status": "queued", "file_path": "/x"}
         self.patches = [patch.object(agent_api, "_runner", self.runner),
                         patch("app.api.chat.get_inference_settings", lambda: isettings(api_keys=KEYS))]
         for p in self.patches:

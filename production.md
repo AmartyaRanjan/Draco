@@ -100,6 +100,8 @@ Misconfiguration found on the first user request is an outage. The lifespan vali
 The worker only converts PDFs, so any other upload used to be queued, picked up, and failed minutes later. The route now rejects by suffix and by the `%PDF-` header of the first chunk (`415`),
 before the file touches disk. This is a type check, not malware scanning: a hostile but valid PDF still reaches Docling (see 6.7).
 
+Uploads now create a registry outbox row in the same SQLite transaction as the document. A leased dispatcher publishes deterministic RQ job IDs, retries with capped exponential backoff, and reconciles pending or lost queue jobs every 30 seconds while the API is running. If queue publication fails, the API returns `503` but retains the registered file so a duplicate upload can resume publication. Approved-source claims use a renewable five-minute lease; a later request can reclaim a claim abandoned before PDF submission, and its resulting document uses the same outbox.
+
 ### 2.8 SQLite stays, with WAL
 
 PostgreSQL was considered and **not** adopted. The registry, conversation store and agent store are small, single-host and already behind interfaces. The real concurrency problem (API and worker both

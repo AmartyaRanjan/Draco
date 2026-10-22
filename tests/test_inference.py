@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage, AIMessageChunk
 from pydantic import ValidationError
 
+from app.db import registry
 from app.inference import tools as tools_mod
 from app.inference.client import map_error
 from app.inference.config import InferenceSettings
@@ -76,6 +77,12 @@ class Harness(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
+        db_patch = patch.object(registry, "DB_PATH", Path(tmp.name) / "documents.db")
+        db_patch.start()
+        self.addCleanup(db_patch.stop)
+        registry.init_db()
+        for document_id in ("d1", "d2", "d3"):
+            registry.create_document(document_id, f"{document_id}.pdf", f"/{document_id}", "alice")
         self.store = SqliteConversationStore(Path(tmp.name) / "c.db")
         self.log = []
 
