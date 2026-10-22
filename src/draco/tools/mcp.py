@@ -12,7 +12,7 @@ and need the `mcp` permission, which the execution policy must grant.
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, cast
 
 from app.agent.contracts import CapabilityError, ErrorCode
 from app.agent.registry import Capability, CapabilityContext, CapabilityRegistry
@@ -50,7 +50,7 @@ def input_model_from_schema(name: str, schema: dict[str, Any] | None) -> type[Ba
     required = set((schema or {}).get("required") or [])
     fields: dict[str, Any] = {}
     for key, spec in props.items():
-        py = _PY_TYPES.get(str(spec.get("type"))) if isinstance(spec, dict) else None
+        py: Any = cast(Any, _PY_TYPES.get(str(spec.get("type")))) if isinstance(spec, dict) else None
         py = py or Any
         fields[key] = (py, ...) if key in required else (py | None, None)
     return create_model(f"{name}_Input", __config__=ConfigDict(extra="forbid"), **fields)

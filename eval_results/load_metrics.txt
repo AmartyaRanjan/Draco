@@ -1,4 +1,0 @@
-http_requests_total{method="GET",route="/health",status="200"} 1.0
-http_requests_total{method="POST",route="/query",status="200"} 80.0
-http_requests_total{method="POST",route="/chat",status="200"} 84.0
-llm_slot_rejections_total 0.0

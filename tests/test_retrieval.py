@@ -188,6 +188,7 @@ class ServiceTests(unittest.TestCase):
         registry.init_db()
         for document_id in ("d1", "d2", "d3"):
             registry.create_document(document_id, f"{document_id}.pdf", f"/{document_id}", "tester")
+            registry.update_status(document_id, "completed")
 
     def test_parallel_wall_clock_not_sum_and_rerank_once(self):
         s = svc(FakeRetriever(self.D, .2, stage="qdrant_query"), FakeRetriever(self.L, .2, stage="opensearch_query"))
@@ -246,6 +247,7 @@ class ApiTests(unittest.TestCase):
         registry.init_db()
         for document_id in ("d1", "d2", "d3"):
             registry.create_document(document_id, f"{document_id}.pdf", f"/{document_id}", "tester")
+            registry.update_status(document_id, "completed")
 
     def test_validation_and_error_mapping(self):
         from app.api.chat import current_user

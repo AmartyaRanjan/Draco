@@ -1,6 +1,0 @@
-{"path": "/query", "generate": false, "concurrency": 1, "requests": 8, "status": {"200": 8}, "wall_s": 14.8, "throughput_rps_ok": 0.54, "latency_s_ok": {"p50": 0.35, "p95": 12.35, "max": 12.35}, "retry_after_seen": []}
-{"path": "/query", "generate": false, "concurrency": 1, "requests": 24, "status": {"200": 24}, "wall_s": 8.2, "throughput_rps_ok": 2.94, "latency_s_ok": {"p50": 0.34, "p95": 0.4, "max": 0.4}, "retry_after_seen": []}
-{"path": "/query", "generate": false, "concurrency": 8, "requests": 48, "status": {"200": 48}, "wall_s": 16.4, "throughput_rps_ok": 2.92, "latency_s_ok": {"p50": 2.72, "p95": 2.78, "max": 2.79}, "retry_after_seen": []}
-{"path": "/chat", "generate": false, "concurrency": 1, "requests": 12, "status": {"200": 12}, "wall_s": 15.2, "throughput_rps_ok": 0.79, "latency_s_ok": {"p50": 1.29, "p95": 2.45, "max": 2.45}, "retry_after_seen": []}
-{"path": "/chat", "generate": false, "concurrency": 4, "requests": 24, "status": {"200": 24}, "wall_s": 16.0, "throughput_rps_ok": 1.5, "latency_s_ok": {"p50": 2.53, "p95": 3.72, "max": 4.04}, "retry_after_seen": []}
-{"path": "/chat", "generate": false, "concurrency": 16, "requests": 48, "status": {"200": 48}, "wall_s": 31.3, "throughput_rps_ok": 1.53, "latency_s_ok": {"p50": 10.09, "p95": 11.42, "max": 12.25}, "retry_after_seen": []}

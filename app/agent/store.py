@@ -13,6 +13,8 @@ from pathlib import Path
 
 from app.agent.contracts import new_id
 
+_VALID_APPROVAL_SOURCE_STATUSES = frozenset({"approved", "ingesting", "ingested", "failed"})
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sources (
   source_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, url TEXT NOT NULL, normalized_url TEXT NOT NULL,
@@ -131,7 +133,7 @@ class AgentStore:
         the same url hash and content snapshot the user was shown."""
         src, ap = self.get_source(source_id, user_id), self.get_approval(source_id, user_id)
         now = time.time()
-        if (not src or not ap or src["status"] != "approved" or
+        if (not src or not ap or src["status"] not in _VALID_APPROVAL_SOURCE_STATUSES or
                 src["expires_at"] < now or ap["decision"] != "approved" or
                 ap["revoked"] or ap["expires_at"] < now):
             return None
@@ -178,7 +180,6 @@ class AgentStore:
             "WHERE job_id=? AND status='claimed' AND lease_until>?",
             (now + lease_seconds, now, job_id, now),
         ) == 1
-
     def job_for_source(self, source_id: str) -> dict | None:
         return self._one("SELECT * FROM ingestion_jobs WHERE source_id=?", (source_id,))
 
@@ -229,3 +230,4 @@ class AgentStore:
             "WHERE job_id=? AND status='failed'",
             (now + 300, now, job_id),
         ) == 1
+

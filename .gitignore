@@ -13,6 +13,7 @@ app/storage/artifacts/
 eval_results/*.ragas.jsonl
 eval_results/*.raw.json
 eval_results/*.log
+eval_results/*
 
 # packaging
 *.egg-info/
