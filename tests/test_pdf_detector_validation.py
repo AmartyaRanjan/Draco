@@ -7,13 +7,17 @@ True for zero pages. Sampling limits must be rejected early and empty
 inspections must not crash.
 """
 import unittest
+import tempfile
+from pathlib import Path
 
 from app.ingestion.pdf_detector import (
     DetectorConfig,
+    PdfDetectionError,
     PdfInspection,
     _sample_indices,
     inspect_pdf,
 )
+from tests.pdf_factory import write_pdf
 
 
 class DetectorSamplingValidationTests(unittest.TestCase):
@@ -39,6 +43,13 @@ class DetectorSamplingValidationTests(unittest.TestCase):
         # Existing behavior preserved: 10 pages sampled to 4.
         self.assertEqual(_sample_indices(10, 4), [0, 2, 5, 7])
         DetectorConfig(max_pages=4)
+
+    def test_document_page_limit_is_checked_before_conversion(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = write_pdf(Path(temp) / "many.pdf", [{"text": "page"}] * 2)
+            with self.assertRaises(PdfDetectionError) as ctx:
+                inspect_pdf(path, DetectorConfig(max_document_pages=1))
+            self.assertIn("page", str(ctx.exception).lower())
 
 
 if __name__ == "__main__":

@@ -21,10 +21,13 @@ def get_opensearch_client() -> OpenSearch:
         )
         username = os.getenv("OPENSEARCH_USERNAME") or None
         password = os.getenv("OPENSEARCH_PASSWORD") or None
-        verify_certs = (
-            os.getenv("OPENSEARCH_VERIFY_CERTS", "false").lower()
-            == "true"
-        )
+        use_ssl = url.startswith("https://")
+        verify_setting = os.getenv("OPENSEARCH_VERIFY_CERTS")
+        # HTTPS must verify by default. An explicit opt-out is retained only for
+        # local development; production refuses to construct an unsafe client.
+        verify_certs = use_ssl if verify_setting is None else verify_setting.lower() == "true"
+        if use_ssl and not verify_certs and os.getenv("APP_ENV", "development").lower() == "production":
+            raise ValueError("OPENSEARCH_VERIFY_CERTS=true is required for HTTPS in production.")
 
         auth = (
             (username, password)
@@ -35,7 +38,7 @@ def get_opensearch_client() -> OpenSearch:
         _client = OpenSearch(
             hosts=[url],
             http_auth=auth,
-            use_ssl=url.startswith("https://"),
+            use_ssl=use_ssl,
             verify_certs=verify_certs,
             ssl_assert_hostname=verify_certs,
             ssl_show_warn=verify_certs,

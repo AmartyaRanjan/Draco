@@ -1,9 +1,15 @@
 import sqlite3
+import os
 from contextlib import closing
 from pathlib import Path
 import time
 
 DB_PATH = Path(__file__).resolve().parents[1] / "storage" / "documents.db"
+MAX_RETRIEVAL_DOCUMENTS = int(os.getenv("MAX_RETRIEVAL_DOCUMENTS", "1000"))
+
+
+class DocumentScopeTooLarge(ValueError):
+    """The owner scope is too large for an ID-list retrieval request."""
 
 #connect to the SQLite database and return the connection object conn.
 def get_connection():
@@ -229,16 +235,23 @@ def list_document_ids_for_owner(owner_id, requested_document_ids=None):
     with closing(get_connection()) as conn:
         if requested_document_ids is None:
             rows = conn.execute(
-                "SELECT document_id FROM documents WHERE owner_id = ? ORDER BY document_id",
-                (owner_id,),
+                "SELECT document_id FROM documents "
+                "WHERE owner_id = ? AND status = 'completed' "
+                "ORDER BY document_id LIMIT ?",
+                (owner_id, MAX_RETRIEVAL_DOCUMENTS + 1),
             ).fetchall()
+            if len(rows) > MAX_RETRIEVAL_DOCUMENTS:
+                raise DocumentScopeTooLarge(
+                    f"Owner scope exceeds MAX_RETRIEVAL_DOCUMENTS={MAX_RETRIEVAL_DOCUMENTS}"
+                )
             return [row["document_id"] for row in rows]
         requested = list(dict.fromkeys(requested_document_ids))
         if not requested:
             return []
         placeholders = ",".join("?" for _ in requested)
         rows = conn.execute(
-            f"SELECT document_id FROM documents WHERE owner_id = ? AND document_id IN ({placeholders})",
+            f"SELECT document_id FROM documents WHERE owner_id = ? AND status = 'completed' "
+            f"AND document_id IN ({placeholders})",
             (owner_id, *requested),
         ).fetchall()
         allowed = {row["document_id"] for row in rows}

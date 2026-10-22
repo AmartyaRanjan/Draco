@@ -13,6 +13,7 @@ from app.api.routes import router
 from app.core.http_settings import get_platform_settings
 from app.core.middleware import PlatformMiddleware
 from app.core.observability import configure_logging
+from app.agent.config import get_agent_settings
 from app.db.registry import init_db
 from app.inference.config import get_inference_settings
 
@@ -25,6 +26,7 @@ async def lifespan(app: FastAPI):
     configure_logging(p.log_level, p.log_json)
     # Fail at boot, not on the first request: bad limits, missing API keys, unsafe production flags.
     p.validate(auth_disabled=get_inference_settings().auth_disabled)
+    get_agent_settings().validate(production=p.production)
     init_db()
     from app.core.queue import ingestion_queue
     from app.ingestion.dispatch import reconcile_ingestion_outbox

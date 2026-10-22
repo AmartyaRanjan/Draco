@@ -1,4 +1,5 @@
 import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -6,6 +7,10 @@ from typing import Literal
 from pypdf import PdfReader
 
 logger = logging.getLogger(__name__)
+
+MAX_PDF_BYTES = int(os.getenv("PDF_MAX_BYTES", str(100 * 1024 * 1024)))
+MAX_PDF_DOCUMENT_PAGES = int(os.getenv("PDF_MAX_PAGES", "1000"))
+MAX_PDF_IMAGES_PER_PAGE = int(os.getenv("PDF_MAX_IMAGES_PER_PAGE", "1000"))
 
 PageType = Literal["digital", "scanned", "ambiguous"]
 
@@ -26,6 +31,9 @@ class DetectorConfig:
     # Inspect at most this many pages, evenly spaced. None inspects every page,
     # which page-level routing needs (about 5 ms per page).
     max_pages: int | None = None
+    # Structural limits are checked before Docling/OCR is invoked.
+    max_document_pages: int | None = MAX_PDF_DOCUMENT_PAGES
+    max_images_per_page: int | None = MAX_PDF_IMAGES_PER_PAGE
 
     def __post_init__(self):
         if self.max_pages is not None and self.max_pages < 1:
@@ -38,6 +46,10 @@ class DetectorConfig:
             )
         if self.large_image_pixels < 1:
             raise ValueError("DetectorConfig large_image_pixels must be >= 1.")
+        if self.max_document_pages is not None and self.max_document_pages < 1:
+            raise ValueError("DetectorConfig max_document_pages must be None or >= 1.")
+        if self.max_images_per_page is not None and self.max_images_per_page < 0:
+            raise ValueError("DetectorConfig max_images_per_page must be None or >= 0.")
 
 
 @dataclass(frozen=True)
@@ -113,6 +125,12 @@ def _classify_page(index: int, page, config: DetectorConfig) -> PageResult:
     except Exception as exc:
         return PageResult(index, "ambiguous", 0, 0, 0, f"inspection failed: {type(exc).__name__}")
 
+    if config.max_images_per_page is not None and images > config.max_images_per_page:
+        raise PdfDetectionError(
+            f"page {index + 1} contains too many images ({images}); "
+            f"limit is {config.max_images_per_page}"
+        )
+
     def result(page_type: PageType, reason: str) -> PageResult:
         return PageResult(index, page_type, chars, images, large_images, reason)
 
@@ -143,6 +161,11 @@ def inspect_pdf(
     config = config or DetectorConfig()
 
     try:
+        file_size = Path(pdf_path).stat().st_size
+        if file_size > MAX_PDF_BYTES:
+            raise PdfDetectionError(
+                f"PDF is {file_size} bytes; limit is {MAX_PDF_BYTES} bytes"
+            )
         with open(pdf_path, "rb") as f:
             reader = PdfReader(f)
             if reader.is_encrypted and not reader.decrypt(""):
@@ -150,6 +173,11 @@ def inspect_pdf(
             page_count = len(reader.pages)
             if page_count == 0:
                 raise PdfDetectionError("PDF contains no pages")
+            if (config.max_document_pages is not None and
+                    page_count > config.max_document_pages):
+                raise PdfDetectionError(
+                    f"PDF has {page_count} pages; limit is {config.max_document_pages}"
+                )
             indices = _sample_indices(page_count, config.max_pages)
             pages = [_classify_page(i, reader.pages[i], config) for i in indices]
     except PdfDetectionError:

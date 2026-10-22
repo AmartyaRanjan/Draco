@@ -130,7 +130,10 @@ class AgentStore:
         """An approval counts only if it is an 'approved' decision, unexpired, unrevoked and bound to
         the same url hash and content snapshot the user was shown."""
         src, ap = self.get_source(source_id, user_id), self.get_approval(source_id, user_id)
-        if not src or not ap or ap["decision"] != "approved" or ap["revoked"] or ap["expires_at"] < time.time():
+        now = time.time()
+        if (not src or not ap or src["status"] != "approved" or
+                src["expires_at"] < now or ap["decision"] != "approved" or
+                ap["revoked"] or ap["expires_at"] < now):
             return None
         if ap["url_hash"] != src["url_hash"] or ap["content_hash"] != src["content_hash"]:
             return None
