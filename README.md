@@ -62,6 +62,90 @@ Core subsystems:
 - **Model serving and reasoning-mode adapters** — vLLM serving Qwen3-4B-FP8 with per-request thinking mode and hermes tool-call parsing; `draco.adapters` maps app exceptions to typed harness errors.
 - **Evaluation, tracing, and failure handling** — an 84-question RAG gold set and a 45-case agent suite; a redacted tracer with JSONL and OpenTelemetry exporters.
 
+## Draco as a framework (`src/draco`)
+
+Draco's native core needs only `pydantic`; retrieval, ingestion, LangGraph, MCP and OpenTelemetry are optional adapters. `app/` is a starter application reached only through `draco.adapters.app_*`.
+
+### The contract
+
+```python
+Workload = Callable[[ExecutionContext, Any], Awaitable[Any]]
+```
+
+Anything with that shape (a function, an agent, a RAG pipeline, a compiled LangGraph graph through an adapter) can be registered with `Harness` and run:
+
+```python
+import asyncio
+from draco import Harness, Identity
+
+async def greeter(ctx, name):
+    return f"hello {name}"
+
+async def main():
+    h = Harness()
+    h.register("greeter", greeter)
+    r = await h.run("greeter", "world", identity=Identity("alice", "acme"))
+    print(r.status, r.output, r.execution_id)   # Status.completed hello world <id>
+
+asyncio.run(main())
+```
+
+`run()` always returns an `ExecutionResult` with one of `completed | failed | cancelled | timeout | budget_exhausted | handoff | waiting`. A failure is never reported as success; `result.raise_for_status()` re-raises it as a typed `DracoError` (with `retryable`).
+
+### Architecture
+
+| Package | Responsibility | Needs |
+|---|---|---|
+| `draco.core` | `ExecutionContext`, `Identity`, `Policy`, budgets, results, typed errors, events, settings | pydantic |
+| `draco.harness` | Lifecycle: identity, authorization, guardrails, execution, deadlines/cancellation, normalization, persistence, `resume()`, `call_model`, `call_with_retry`, `step` | |
+| `draco.agents` | `AgentRegistry`, `Router` (explicit, rule, capability and optional LLM strategies), handoffs, delegation, loop and depth limits | |
+| `draco.tools` | `Tool`, `ToolRegistry`, `ToolRuntime` (policy, authorization, budget, retries, untrusted output), native tools, MCP tools | MCP: `draco[mcp]` |
+| `draco.security` | `Authorizer`/`RoleAuthorizer`, `Resource`, `authorize()`, audit events, `Secret` | |
+| `draco.state` | Execution, event and step-checkpoint stores: `InMemoryStore`, `SqliteStore` | |
+| `draco.observability` | `Tracer`, redaction, JSONL and OpenTelemetry exporters | OTel: `draco[otel]` |
+| `draco.plugins`, `draco.policies` | Service registry, plugin host with dependency ordering, input/output guardrails | |
+| `draco.adapters` | Translation to external components. Neutral: `model_provider`, `retrieval`, `ingestion`. Framework: `langgraph`. Starter app: `app_*`, `conversation`, `errors` | see below |
+
+Dependency direction is enforced by `tests/draco/unit/test_import_boundaries.py`: layers only import downward, and only `draco.adapters` may import `app`.
+
+### Install
+
+```
+pip install -e .              # native framework
+pip install -e ".[agents]"    # LangGraph adapter
+pip install -e ".[mcp]"       # MCP tools
+pip install -e ".[otel]"      # OpenTelemetry exporter
+pip install -e ".[dev]"       # pytest, ruff, mypy
+```
+The starter-app adapters additionally need the app's stack (`pip install -r requirements.txt`, plus `.[app]`).
+
+### Security model (summary)
+
+Authenticate in your application and hand Draco an `Identity(subject, tenant_id, roles)`; user and tenant are derived from it, children inherit it, and nothing in input, tool arguments or metadata can override it. Protected operations (`workload.run`, `tool.call`, `retrieval.query`, `document.read`, `document.ingest`, `execution.resume`) go through an `Authorizer` before any side effect and are audited; unresolvable or failing authorization denies. Tenant isolation covers resources, idempotency keys, resume and cancel. Full list of what is enforced, what you must configure, and known gaps: [docs/api-guide.md#security](docs/api-guide.md).
+
+### Observability
+
+Every lifecycle step emits an event (`execution.*`, `route.decided`, `handoff`, `model.*`, `tool.*`, `retrieval.after`, `retry`, `step.*`, `security.*`). The `Tracer` redacts secrets and pseudonymises user/tenant ids before storing or exporting. `Harness(exporters=[JsonlExporter(path)])` or `DRACO_TRACE_PATH`; telemetry handler failures never break a run.
+
+### Persistence and resumption
+
+`Harness(store=SqliteStore(path))` persists executions, redacted events and `step()` checkpoints. `resume(execution_id)` re-runs under the same id; completed steps return their recorded results, and an unfinished non-idempotent step raises `ReconciliationRequired` instead of repeating a side effect. Draco does not promise exactly-once effects, and cancellation is cooperative (it takes effect at the workload's next `await`).
+
+### Examples
+
+`PYTHONPATH=src:. python -m examples.<name>`
+
+| | |
+|---|---|
+| `a_simple` | native workload, trace, persisted status |
+| `c_multi_agent` | agent registry, capability routing, handoffs |
+| `d_tool` | native tool, permissions, audit |
+| `e_recovery` | steps, failure, resume |
+| `f_plugin` | plugin with a service and hooks |
+| `g_secure_tenants` | identity, tenant isolation, role grants (no starter app) |
+| `h_langgraph` | LangGraph graph through the adapter, interrupt and resume |
+| `b_rag` | starter-app RAG through the adapter (needs the app stack) |
+
 ## Features and Implementation Status
 
 | Capability | Status | Verification |
@@ -74,7 +158,7 @@ Core subsystems:
 | Tenant isolation | Partial — document ownership enforced on all retrieval paths; single-tenant trust domain otherwise | `tests/test_document_ownership.py`, [docs/DOCUMENT_OWNERSHIP.md](docs/DOCUMENT_OWNERSHIP.md) |
 | Live external integrations | Implemented with approval gates and SSRF/injection defences; not exercised against live services in CI | [evals.md](evals.md), [production.md](production.md) §6 |
 
-## Quick Start
+Dependency direction is enforced by `tests/draco/unit/test_import_boundaries.py`: layers only import downward, and only `draco.adapters` may import `app`.
 
 Prerequisites: Python ≥ 3.11, Redis, Qdrant, OpenSearch, and a vLLM server (see `deploy/vllm/`). Full runbook: [production.md](production.md).
 

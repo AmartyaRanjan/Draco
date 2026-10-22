@@ -29,3 +29,13 @@ class Policy:
     def authorize_agent(self, agent_id: str) -> None:
         if self.allowed_agents is not None and agent_id not in self.allowed_agents:
             raise PolicyViolation(f"agent '{agent_id}' is not allowed for this execution")
+
+    def narrows(self, parent: Policy) -> bool:
+        """True if this policy grants nothing the parent does not. Child executions may only narrow."""
+        def within(child: frozenset[str] | None, par: frozenset[str] | None) -> bool:  # None = unrestricted
+            return par is None or (child is not None and child <= par)
+        tools_ok = (self.allowed_tools or frozenset()) <= (parent.allowed_tools or frozenset())  # None = no tools
+        return (self.permissions <= parent.permissions and tools_ok
+                and within(self.allowed_agents, parent.allowed_agents)
+                and parent.denied_tools <= self.denied_tools
+                and (parent.allow_approval_required or not self.allow_approval_required))

@@ -10,7 +10,8 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 from draco.core.budget import BudgetTracker
-from draco.core.errors import ExecutionCancelled, ExecutionTimeout
+from draco.core.errors import ExecutionCancelled, ExecutionTimeout, PolicyViolation
+from draco.core.identity import Identity
 from draco.core.policy import Policy
 
 
@@ -62,6 +63,7 @@ class ExecutionContext:
     agent_id: str | None = None
     user_id: str | None = None
     tenant_id: str | None = None
+    identity: Identity | None = None  # trusted: set by the harness from verified credentials; inherited, never overridable
     correlation_id: str = field(default_factory=new_id)
     created_at: float = field(default_factory=time.time)
     cancel: CancellationToken = field(default_factory=CancellationToken)
@@ -75,6 +77,11 @@ class ExecutionContext:
     def child(self, *, agent_id: str | None = None, deadline: float | None = None,
               policy: Policy | None = None, metadata: dict[str, Any] | None = None) -> ExecutionContext:
         self.budget.check_depth(self.depth + 1)
+        if policy is not None and not policy.narrows(self.policy):
+            raise PolicyViolation("a child execution cannot widen its parent's policy")
+        clash = RESERVED_METADATA & set(metadata or {})
+        if clash:
+            raise PolicyViolation(f"metadata cannot set trusted fields {sorted(clash)}")
         dls = [d for d in (self.deadline, deadline) if d is not None]
         return replace(self, execution_id=new_id(), parent_execution_id=self.execution_id,
                        agent_id=agent_id or self.agent_id, depth=self.depth + 1,
@@ -98,6 +105,9 @@ class ExecutionContext:
                 "session_id": self.session_id, "agent_id": self.agent_id,
                 "correlation_id": self.correlation_id}
 
+
+RESERVED_METADATA = frozenset({"identity", "user_id", "tenant_id", "subject", "roles", "execution_id",
+                               "parent_execution_id", "correlation_id", "policy", "authorizer"})
 
 _current: contextvars.ContextVar[ExecutionContext | None] = contextvars.ContextVar("draco_ctx", default=None)
 

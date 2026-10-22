@@ -4,9 +4,9 @@ import asyncio
 from pydantic import BaseModel, Field
 
 from draco import ExecutionContext, Harness, Policy
-from draco.tools import CapabilityRegistry, ToolRuntime, native_tool
+from draco.tools import ToolRegistry, ToolRuntime, native_tool
 
-registry = CapabilityRegistry()
+registry = ToolRegistry()
 
 
 class Convert(BaseModel):

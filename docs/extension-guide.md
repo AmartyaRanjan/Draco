@@ -40,7 +40,7 @@ Semantics: providers start before dependents; cycles, duplicate plugin ids, dupl
 
 ## Your own workload, tool, router strategy, store, exporter
 - Workload/agent: any `async def (ctx, input)`; use `call_model`, `step`, `ctx.check()` and `h.run(..., parent=ctx)` for nested work.
-- Tool: `native_tool(...)`; raise `CapabilityError(ErrorCode.x, msg, retryable=...)` for expected failures.
+- Tool: `native_tool(...)`; raise `ToolFailure(ErrorCode.x, msg, retryable=...)` for expected failures.
 - Router strategy: a callable `(ctx, RouteRequest, registry) -> RoutingDecision | None`.
 - Store: implement `ExecutionStore`, `EventStore`, `CheckpointStore` (`draco.state.stores`) and pass `Harness(store=...)`.
 - Exporter: an object with `export(record: dict)`; pass `Harness(exporters=[...])`.

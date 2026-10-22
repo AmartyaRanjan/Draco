@@ -11,9 +11,10 @@ from typing import Any
 
 from draco.core.budget import BudgetLimits, BudgetTracker
 from draco.core.config import DracoSettings
-from draco.core.context import CancellationToken, ExecutionContext, new_id, use_context
-from draco.core.errors import ContractError, DracoError, PersistenceError, RoutingError
+from draco.core.context import RESERVED_METADATA, CancellationToken, ExecutionContext, new_id, use_context
+from draco.core.errors import ContractError, DracoError, PersistenceError, PolicyViolation, RoutingError
 from draco.core.events import Event, EventBus
+from draco.core.identity import Identity
 from draco.core.policy import Policy
 from draco.core.protocols import Workload
 from draco.core.results import ErrorInfo, ExecutionResult, Handoff, Status, Usage, Waiting, status_for
@@ -22,6 +23,8 @@ from draco.observability.trace import Exporter, JsonlExporter, Tracer
 from draco.plugins.registry import PluginHost
 from draco.plugins.services import ServiceRegistry
 from draco.policies.guardrails import Guardrail, run_guardrails
+from draco.security.audit import authorize
+from draco.security.authorization import Authorizer, Resource, RoleAuthorizer
 from draco.state.memory import InMemoryStore
 from draco.state.stores import ExecutionRecord
 
@@ -41,7 +44,7 @@ class WorkloadSpec:
 class Harness:
     def __init__(self, settings: DracoSettings | None = None, *, store: Any = None,
                  host: PluginHost | None = None, exporters: list[Exporter] | None = None,
-                 strict_persistence: bool = False):
+                 strict_persistence: bool = False, authorizer: Authorizer | None = None):
         self.settings = settings or DracoSettings()
         self.host = host or PluginHost()
         self.services: ServiceRegistry = self.host.services
@@ -51,7 +54,8 @@ class Harness:
         if exporters is None and self.settings.trace_path:
             exporters = [JsonlExporter(self.settings.trace_path)]
         self.tracer = Tracer(self.bus, exporters, Redactor(self.settings.redact_keys, self.settings.max_payload_chars, pii_keys=self.settings.pii_keys))
-        for name, svc in (("events", self.bus), ("settings", self.settings), ("store", self.store),
+        self.authorizer: Authorizer = authorizer or RoleAuthorizer(require_identity=self.settings.require_identity)
+        for name, svc in (("authorizer", self.authorizer), ("events", self.bus), ("settings", self.settings), ("store", self.store),
                           ("tracer", self.tracer), ("harness", self)):
             if not self.services.has(name):  # protected: plugins cannot replace these
                 self.services.provide(name, svc, protected=True)
@@ -94,9 +98,13 @@ class Harness:
         if e.execution_id and hasattr(self.store, "append_event"):
             await self.store.append_event(e.execution_id, e.name, e.ts, self.tracer.redactor.redact(e.data))
 
-    def cancel(self, execution_id: str, reason: str = "cancelled by caller") -> bool:
+    def cancel(self, execution_id: str, reason: str = "cancelled by caller", *, identity: Identity | None = None) -> bool:
+        """Cancel a running execution. A tenant-scoped execution can only be cancelled by an identity of
+        the same tenant; without one it reports False (not found) rather than revealing it exists."""
         ctx = self._inflight.get(execution_id)
         if ctx is None:
+            return False
+        if ctx.tenant_id is not None and (identity is None or identity.tenant_id != ctx.tenant_id):
             return False
         ctx.cancel.cancel(reason)
         return True
@@ -105,13 +113,23 @@ class Harness:
     def _new_context(self, *, parent: ExecutionContext | None, target: str, session_id: str | None,
                      user_id: str | None, tenant_id: str | None, policy: Policy | None,
                      limits: BudgetLimits | None, timeout_s: float | None, cancel: CancellationToken | None,
-                     correlation_id: str | None, agent_id: str | None, metadata: dict[str, Any] | None) -> ExecutionContext:
+                     correlation_id: str | None, agent_id: str | None, metadata: dict[str, Any] | None,
+                     identity: Identity | None = None) -> ExecutionContext:
         timeout = timeout_s if timeout_s is not None else self.settings.default_timeout_s
         deadline = time.monotonic() + timeout if timeout else None
         if parent is not None:
+            if identity is not None and identity != parent.identity:
+                raise PolicyViolation("a child execution inherits its parent's identity and cannot change it")
+            if (user_id and user_id != parent.user_id) or (tenant_id and tenant_id != parent.tenant_id):
+                raise PolicyViolation("a child execution cannot change user or tenant")
             return parent.child(agent_id=agent_id or target, deadline=deadline, policy=policy, metadata=metadata)
         lim = limits or self.settings.limits()
+        if identity is not None:
+            if (user_id and user_id != identity.subject) or (tenant_id and tenant_id != identity.tenant_id):
+                raise PolicyViolation("user_id/tenant_id contradict the authenticated identity")
+            user_id, tenant_id = identity.subject, identity.tenant_id
         return ExecutionContext(
+            identity=identity,
             session_id=session_id, agent_id=agent_id or target, user_id=user_id, tenant_id=tenant_id,
             correlation_id=correlation_id or new_id(), cancel=cancel or CancellationToken(),
             deadline=deadline, budget=BudgetTracker(lim), policy=policy or Policy(), services=self.services,
@@ -122,23 +140,29 @@ class Harness:
                   policy: Policy | None = None, limits: BudgetLimits | None = None,
                   timeout_s: float | None = None, cancel: CancellationToken | None = None,
                   idempotency_key: str | None = None, correlation_id: str | None = None,
-                  agent_id: str | None = None, metadata: dict[str, Any] | None = None) -> ExecutionResult:
+                  agent_id: str | None = None, metadata: dict[str, Any] | None = None,
+                  identity: Identity | None = None) -> ExecutionResult:
+        """`identity` is the trusted caller (from your Authenticator). Plain `user_id`/`tenant_id` are accepted
+        for trusted in-process callers but carry no authentication; they cannot contradict an identity, and
+        children always inherit the parent's. Idempotency keys are scoped per tenant."""
         try:
             ctx = self._new_context(parent=parent, target=target, session_id=session_id or (parent.session_id if parent else None),
                                     user_id=user_id, tenant_id=tenant_id, policy=policy, limits=limits,
                                     timeout_s=timeout_s, cancel=cancel, correlation_id=correlation_id,
-                                    agent_id=agent_id, metadata=metadata)
+                                    agent_id=agent_id, metadata=metadata, identity=identity)
+            _reserved_check(metadata)
         except DracoError as exc:  # e.g. depth budget exhausted while creating a child
             return ExecutionResult(status_for(exc), new_id(), error=ErrorInfo.from_exception(exc),
                                    parent_execution_id=parent.execution_id if parent else None,
                                    finished_at=time.time())
         if ctx.services is None:
             ctx = ExecutionContext(**{**ctx.__dict__, "services": self.services})
-        return await self._execute(ctx, target, input, idempotency_key=idempotency_key, attempts=1, resumed=False,
+        return await self._execute(ctx, target, input, idempotency_key=scope_key(idempotency_key, ctx.tenant_id), attempts=1, resumed=False,
                                    is_root=parent is None)
 
     async def resume(self, execution_id: str, *, input: Any = None, timeout_s: float | None = None,
-                     policy: Policy | None = None, limits: BudgetLimits | None = None) -> ExecutionResult:
+                     policy: Policy | None = None, limits: BudgetLimits | None = None,
+                     identity: Identity | None = None) -> ExecutionResult:
         """Re-run a failed, waiting or interrupted execution under the same execution id. Completed `step()`s
         return their recorded results; unfinished non-idempotent steps raise ReconciliationRequired."""
         rec = await self.store.get_execution(execution_id)
@@ -149,12 +173,16 @@ class Harness:
         if execution_id in self._inflight:
             raise ContractError(f"execution '{execution_id}' is still running")
         timeout = timeout_s if timeout_s is not None else self.settings.default_timeout_s
+        if rec.tenant_id is not None and (identity is None or identity.tenant_id != rec.tenant_id):
+            raise ContractError(f"unknown execution '{execution_id}'")  # same answer as a missing id: no cross-tenant probing
         ctx = ExecutionContext(
             execution_id=rec.execution_id, parent_execution_id=rec.parent_execution_id, session_id=rec.session_id,
+            identity=identity, user_id=identity.subject if identity else rec.user_id, tenant_id=rec.tenant_id,
             agent_id=rec.agent_id, correlation_id=rec.correlation_id or new_id(),
             deadline=time.monotonic() + timeout if timeout else None,
             budget=BudgetTracker(limits or self.settings.limits()), policy=policy or Policy(),
             services=self.services, metadata={"resumed": True, "previous_status": rec.status})
+        await authorize(ctx, "execution.resume", Resource("execution", rec.execution_id, rec.tenant_id))
         return await self._execute(ctx, rec.target, rec.input if input is None else input,
                                    idempotency_key=rec.idempotency_key, attempts=rec.attempts + 1, resumed=True,
                                    is_root=rec.parent_execution_id is None)
@@ -179,7 +207,8 @@ class Harness:
         usage0 = ctx.budget.snapshot()
         rec = ExecutionRecord(ctx.execution_id, target, "running", started, ctx.parent_execution_id, ctx.session_id,
                               ctx.agent_id, ctx.correlation_id, idempotency_key=idempotency_key, attempts=attempts,
-                              input=_jsonable(input))
+                              input=_jsonable(input), tenant_id=ctx.tenant_id, user_id=ctx.user_id,
+                              roles=sorted(ctx.identity.roles) if ctx.identity else [])
         sem_held = False
         try:
             # 1. resolve + authorize
@@ -213,6 +242,7 @@ class Harness:
                                       ctx.parent_execution_id, ctx.correlation_id,
                                       {"agent_id": ctx.agent_id, "target": target, "depth": ctx.depth,
                                        "user_id": ctx.user_id, "tenant_id": ctx.tenant_id, "session_id": ctx.session_id}))
+            await authorize(ctx, "workload.run", Resource("workload", target, attributes=dict(spec.meta)))
             await run_guardrails(self._input_guards, ctx, input)
             ctx.check()
             # 3. execute
@@ -304,6 +334,17 @@ class Harness:
             await self.bus.emit(Event(name, ctx.execution_id, ctx.parent_execution_id, ctx.correlation_id, data))
         except Exception as exc:  # a critical handler vetoing after the fact cannot change the outcome
             logger.warning("post_execution_handler_failed", extra={"event": name, "error": type(exc).__name__})
+
+
+def scope_key(key: str | None, tenant_id: str | None) -> str | None:
+    """Idempotency keys live in a per-tenant namespace, so one tenant can never replay another's result."""
+    return None if key is None else f"{tenant_id or '-'}\x1f{key}"
+
+
+def _reserved_check(metadata: dict[str, Any] | None) -> None:
+    clash = RESERVED_METADATA & set(metadata or {})
+    if clash:
+        raise PolicyViolation(f"metadata cannot set trusted fields {sorted(clash)}")
 
 
 def _jsonable(v: Any) -> Any:

@@ -5,16 +5,17 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "draco"
 version = "0.1.0"
-description = "Execution harness, plugin layer, router and tool runtime for RAG and agentic applications"
+description = "Embeddable agent runtime: harness, routing, tools, security, state and observability, with optional adapters"
 readme = "README.md"
 requires-python = ">=3.11"
-# core/plugins/policies/harness/observability/state/agents need only pydantic. draco.tools builds on
-# app.agent.contracts/registry/web, which add httpx. The app's heavy ML stack stays in requirements.txt
-# and is only needed by draco.adapters that wrap retrieval/ingestion.
-dependencies = ["pydantic>=2.6", "httpx>=0.27"]
+# The native framework (core, harness, agents, routing, tools, security, state, observability) needs only
+# pydantic. Everything else is an optional extra; adapters for the starter RAG app (`app`) need its own
+# stack (requirements.txt) and are never imported by the core.
+dependencies = ["pydantic>=2.6"]
 
 [project.optional-dependencies]
-agents = ["langgraph>=1.0", "langchain-core"]
+agents = ["langgraph>=1.0", "langchain-core"]   # draco.adapters.langgraph
+app = ["httpx>=0.27"]                            # adapters for the bundled starter app (plus requirements.txt)
 mcp = ["mcp>=1.0"]
 otel = ["opentelemetry-api", "opentelemetry-sdk"]
 dev = ["pytest>=8", "ruff", "mypy", "pip-audit"]

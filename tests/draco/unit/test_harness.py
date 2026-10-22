@@ -14,6 +14,7 @@ from draco.core import (
 )
 from draco.core.errors import DracoError, PersistenceError
 from draco.harness import Harness, call_model, call_with_retry, step
+from draco.harness.runner import scope_key
 from draco.state import InMemoryStore, SqliteStore
 
 
@@ -236,7 +237,7 @@ async def test_idempotency_after_failure_reruns_with_attempt_count():
     state["fail"] = False
     r = await h.run("w", idempotency_key="k")
     assert r.status == Status.completed and not r.replayed
-    assert (await h.store.find_by_key("k")).attempts == 2
+    assert (await h.store.find_by_key(scope_key("k", None))).attempts == 2
 
 
 class BrokenStore(InMemoryStore):

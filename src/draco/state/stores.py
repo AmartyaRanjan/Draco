@@ -24,6 +24,9 @@ class ExecutionRecord:
     usage: dict[str, Any] = field(default_factory=dict)
     attempts: int = 1
     input: Any = None  # as JSON; stored so a failed/waiting run can be resumed
+    tenant_id: str | None = None  # owner; resume() and lookups are checked against the caller's tenant
+    user_id: str | None = None
+    roles: list[str] = field(default_factory=list)
 
 
 @dataclass

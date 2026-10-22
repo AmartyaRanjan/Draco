@@ -19,6 +19,7 @@ from draco.core.errors import (
                                ToolError,
 )
 from draco.core.events import Event, EventBus
+from draco.core.identity import Authenticator, Identity
 from draco.core.policy import Policy
 from draco.core.protocols import Workload
 from draco.core.results import ErrorInfo, ExecutionResult, Handoff, Status, Usage, Waiting, status_for

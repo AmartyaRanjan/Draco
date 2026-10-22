@@ -5,7 +5,7 @@ from typing import Any
 
 from draco.adapters.errors import map_app_error
 from draco.core.context import ExecutionContext
-from draco.core.errors import ContractError, ProviderError
+from draco.core.errors import ContractError, PolicyViolation, ProviderError
 from draco.core.protocols import Workload
 
 
@@ -24,8 +24,10 @@ def agent_runner_workload(runner: Any) -> Workload:
         except Exception as exc:
             raise ContractError("invalid agent request") from exc
         ctx.check()
+        if not ctx.user_id:  # the runner scopes sessions and evidence by user: never default to a shared identity
+            raise PolicyViolation("agent execution requires an authenticated user")
         try:
-            resp = await runner.run(req, ctx.user_id or "anonymous")
+            resp = await runner.run(req, ctx.user_id)
         except Exception as exc:
             mapped = map_app_error(exc)
             if mapped is not None:

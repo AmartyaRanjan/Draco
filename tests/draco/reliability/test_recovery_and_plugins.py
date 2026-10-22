@@ -4,6 +4,7 @@ import pytest
 
 from draco.core import ContractError, DracoSettings, PolicyViolation, Status
 from draco.harness import Harness, step
+from draco.harness.runner import scope_key
 from draco.plugins import Plugin, PluginHost
 from draco.state import ExecutionRecord, SqliteStore
 
@@ -42,7 +43,7 @@ async def test_resume_after_process_restart_from_durable_state(tmp_path):
 
 async def test_interrupted_run_blocks_same_idempotency_key_until_resumed(tmp_path):
     store = SqliteStore(str(tmp_path / "s.db"))
-    await store.save_execution(ExecutionRecord("e1", "w", "running", 1.0, idempotency_key="K", input=1))
+    await store.save_execution(ExecutionRecord("e1", "w", "running", 1.0, idempotency_key=scope_key("K", None), input=1))
     h = Harness(DracoSettings(), store=store)
     ran = []
 
