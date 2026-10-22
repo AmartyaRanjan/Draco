@@ -4,7 +4,7 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 
-from app.db.registry import get_document
+from app.db.registry import get_document, list_document_ids_for_owner
 from app.retrieval import fusion
 from app.retrieval.context import BuiltContext, TokenCounter, build_context
 from app.retrieval.generator import SYSTEM, WEAK_NOTE
@@ -30,10 +30,11 @@ class RetrievalOutcome:
     degraded: list[str] = field(default_factory=list)
 
 
-def resolve_filters(requested_document_ids: list[str] | None, principal=None) -> list[str] | None:
-    """Single place to enforce access control. The app has no auth/tenancy yet, so
-    client-supplied document ids only ever *narrow* the search."""
-    return list(dict.fromkeys(requested_document_ids)) if requested_document_ids else None
+def resolve_filters(requested_document_ids: list[str] | None, principal=None) -> list[str]:
+    """Intersect client filters with the authenticated principal's owned documents."""
+    if not isinstance(principal, str) or not principal.strip():
+        return []
+    return list_document_ids_for_owner(principal, requested_document_ids)
 
 
 class RetrievalService:
@@ -90,6 +91,10 @@ class RetrievalService:
                 doc_ids = resolve_filters(document_ids, principal)
             with trace.stage("query_preprocessing"):
                 pass  # normalisation done above; stage kept for a stable timing schema
+            if not doc_ids:
+                trace.set(dense_candidates=0, bm25_candidates=0, overlap=0, unique_candidates=0,
+                          conflicts=0, degraded=[], reranked=0, selected=0, passed=0, fallback=0)
+                return RetrievalOutcome(trace.request_id, q, None, BuiltContext(), trace, [])
             dense, lex, degraded = await self._hybrid(q, doc_ids, trace)
             with trace.stage("deduplication"):
                 unique, stats = fusion.deduplicate(dense, lex)

@@ -26,9 +26,9 @@ async def query(req: QueryRequest, user: str = Depends(heavy_user)):
     try:
         if req.generate:
             async with concurrency.llm_slot():
-                out, gen = await svc.answer(req.query, req.document_ids)
+                out, gen = await svc.answer(req.query, req.document_ids, principal=user)
         else:
-            out, gen = await svc.retrieve(req.query, req.document_ids), None
+            out, gen = await svc.retrieve(req.query, req.document_ids, principal=user), None
             out.trace.finish("degraded" if out.degraded else "ok")
     except HTTPException:
         raise

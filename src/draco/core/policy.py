@@ -9,7 +9,7 @@ from draco.core.errors import PolicyViolation
 @dataclass(frozen=True)
 class Policy:
     permissions: frozenset[str] = frozenset({"read"})
-    allowed_tools: frozenset[str] | None = None  # None = every registered tool the permissions allow
+    allowed_tools: frozenset[str] | None = None  # None = no tools are permitted
     denied_tools: frozenset[str] = field(default_factory=frozenset)
     allowed_agents: frozenset[str] | None = None
     allow_approval_required: bool = False
@@ -18,7 +18,7 @@ class Policy:
                        requires_approval: bool = False) -> None:
         if name in self.denied_tools:
             raise PolicyViolation(f"tool '{name}' is denied by policy")
-        if self.allowed_tools is not None and name not in self.allowed_tools:
+        if self.allowed_tools is None or name not in self.allowed_tools:
             raise PolicyViolation(f"tool '{name}' is not allowed for this execution")
         missing = required - self.permissions
         if missing:

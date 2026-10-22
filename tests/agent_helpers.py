@@ -113,7 +113,8 @@ def make_services(tmp: Path | None = None, **kw):
     docs = {}
     svc = Services(settings=s, store=store, counter=CharCounter(),
                    artifact_store=ArtifactStore(s.artifact_dir, store, max_bytes=s.artifact_max_bytes, ttl_days=s.artifact_ttl_days),
-                   document_lookup=lambda d: docs.get(d), pages_lookup=lambda d: [])
+                   document_lookup=lambda d, user: docs.get(d) if docs.get(d, {}).get("owner_id") == user else None,
+                   pages_lookup=lambda d, user: [] if docs.get(d, {}).get("owner_id") == user else [])
     svc.extra["docs"], svc.extra["upload_dir"] = docs, str(tmp / "uploads")
     for k, v in kw.items():
         setattr(svc, k, v)

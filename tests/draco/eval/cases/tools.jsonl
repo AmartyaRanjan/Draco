@@ -7,4 +7,4 @@
 {"id": "unknown-tool", "allowed": ["add"], "perms": ["read"], "call": "nope", "args": {}, "expect": "not_found"}
 {"id": "exposure-none-by-default", "allowed": null, "perms": ["read"], "expose": []}
 {"id": "exposure-filtered", "allowed": ["add", "write_db", "send_email"], "perms": ["read"], "expose": ["add"]}
-{"id": "exposure-with-write", "allowed": ["add", "write_db", "send_email"], "perms": ["read", "write"], "expose": ["add", "send_email", "write_db"]}
+{"id": "exposure-with-write", "allowed": ["add", "write_db", "send_email"], "perms": ["read", "write"], "expose": ["add", "write_db"]}

@@ -41,5 +41,6 @@ jobs:
         run: python -m pytest tests/draco/unit tests/draco/reliability -q
       - name: Dependency audit (framework deps, then the app's pinned requirements)
         run: |
+          python -m pip uninstall --yes draco
           pip-audit --skip-editable --strict --desc
           pip-audit -r requirements.txt --no-deps --disable-pip --desc

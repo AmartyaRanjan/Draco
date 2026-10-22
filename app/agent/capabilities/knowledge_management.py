@@ -104,7 +104,7 @@ class IngestOut(BaseModel):
 def _refresh(svc, job: dict, src: dict) -> dict:
     """Mirror the ingestion registry's status (queued/processing/completed/failed) onto our records."""
     if job.get("document_id") and svc.document_lookup:
-        doc = svc.document_lookup(job["document_id"])
+        doc = svc.document_lookup(job["document_id"], src["user_id"])
         if doc and doc["status"] != job["status"]:
             svc.store.update_job(job["job_id"], status=doc["status"], error=None if doc["status"] != "failed" else "ingestion failed")
             svc.store.set_source_status(src["source_id"], {"completed": "ingested", "failed": "failed"}.get(doc["status"], "ingesting"))
@@ -136,14 +136,25 @@ async def ingest_approved_source(a: IngestIn, ctx):
     title = src["title"] or "web source"
     header = [f"Source URL: {src['url']}", f"Retrieved: {time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime(src['created_at']))} UTC",
               f"Content SHA-256: {src['content_hash']}", f"Approved source_id: {src['source_id']}"]
+    import asyncio
+
+    async def renew_claim():
+        while True:
+            await asyncio.sleep(60)
+            if not await asyncio.to_thread(svc.store.renew_claim, job["job_id"]):
+                return
+
+    renewal = asyncio.create_task(renew_claim())
     try:
-        import asyncio
         pdf = await asyncio.to_thread(A.text_to_pdf, title, header, src["content_text"])
         res = await asyncio.to_thread(ingest, ctx.user_id, f"{title[:80]} ({src['preview']['domain']}).pdf", pdf)
     except Exception as exc:
         svc.store.update_job(job["job_id"], status="failed", error=type(exc).__name__)
         svc.store.set_source_status(a.source_id, "failed")
         raise CapabilityError(ErrorCode.upstream_error, "Could not submit the source to the ingestion queue.", retryable=True) from exc
+    finally:
+        renewal.cancel()
+        await asyncio.gather(renewal, return_exceptions=True)
     svc.store.update_job(job["job_id"], document_id=res["document_id"], rq_job_id=res.get("job_id"), status=res["status"])
     svc.store.set_source_status(a.source_id, "ingesting" if res["status"] != "completed" else "ingested")
     return Outcome(IngestOut(source_id=a.source_id, job_id=job["job_id"], document_id=res["document_id"],
@@ -178,9 +189,10 @@ async def inspect_source_provenance(a: ProvenanceIn, ctx):
         rows = svc.store.sources_for_url(ctx.user_id, url_hash(a.url))
         src = svc.store.get_source(rows[0]["source_id"], ctx.user_id) if rows else None
     else:
-        job = svc.store._one("SELECT source_id FROM ingestion_jobs WHERE document_id=?", (a.document_id,))
+        doc = svc.document_lookup(a.document_id, ctx.user_id) if svc.document_lookup else None
+        job = svc.store._one("SELECT source_id FROM ingestion_jobs WHERE document_id=?", (a.document_id,)) if doc else None
         src = svc.store.get_source(job["source_id"], ctx.user_id) if job else None
-    doc = svc.document_lookup(a.document_id) if (a.document_id and svc.document_lookup) else None
+    doc = svc.document_lookup(a.document_id, ctx.user_id) if (a.document_id and svc.document_lookup) else None
     if src is None:
         if doc:
             return ProvenanceOut(found=True, document={"document_id": doc["document_id"], "filename": doc["filename"],
@@ -192,7 +204,7 @@ async def inspect_source_provenance(a: ProvenanceIn, ctx):
         job = _refresh(svc, job, src)
         src = svc.store.get_source(src["source_id"], ctx.user_id)  # status may have just been refreshed
     ap = svc.store.get_approval(src["source_id"], ctx.user_id)
-    d = svc.document_lookup(job["document_id"]) if (job and job.get("document_id") and svc.document_lookup) else doc
+    d = svc.document_lookup(job["document_id"], ctx.user_id) if (job and job.get("document_id") and svc.document_lookup) else doc
     return ProvenanceOut(
         found=True,
         source={k: src[k] for k in ("source_id", "url", "title", "status", "content_hash", "reason", "created_at", "expires_at")} | {"trust": src["trust"]},

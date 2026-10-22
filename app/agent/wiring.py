@@ -29,27 +29,41 @@ def generation_counter(s: InferenceSettings) -> TokenCounter:
 
 def ingest_pdf(user_id: str, filename: str, pdf: bytes) -> dict:
     """Feed PDF bytes into the existing pipeline exactly as POST /documents does: content-hash
-    duplicate check, registry row, RQ job running ingestion.worker.process_document."""
+    duplicate check, durable registry/outbox row, RQ job running ingestion.worker.process_document."""
     from app.core.queue import ingestion_queue
-    from app.ingestion.worker import process_document
+    from app.ingestion.dispatch import submit_document
+
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     doc_id = str(uuid4())
     safe = Path(filename).name
     path = UPLOAD_DIR / f"{doc_id}_{safe}"
     path.write_bytes(pdf)
-    existing = registry.register_upload(doc_id, safe, str(path.resolve()), hashlib.sha256(pdf).hexdigest())
-    if existing is not None:
-        path.unlink(missing_ok=True)
-        return {"document_id": existing["document_id"], "job_id": existing["job_id"], "status": existing["status"], "duplicate": True}
+    registered = False
     try:
-        registry.update_status(doc_id, "queued")
-        job = ingestion_queue.enqueue(process_document, doc_id, str(path.resolve()), job_timeout=3600, result_ttl=86400)
-        registry.set_job_id(doc_id, job.id)
+        existing = registry.register_upload(
+            doc_id, safe, str(path.resolve()), hashlib.sha256(pdf).hexdigest(), user_id
+        )
+        if existing is not None:
+            path.unlink(missing_ok=True)
+            job_id = submit_document(existing["document_id"], ingestion_queue)
+            if not job_id:
+                raise RuntimeError("Ingestion publication is already in progress")
+            return {
+                "document_id": existing["document_id"],
+                "job_id": job_id,
+                "status": registry.get_document(existing["document_id"])["status"],
+                "duplicate": True,
+            }
+
+        registered = True
+        job_id = submit_document(doc_id, ingestion_queue)
+        if not job_id:
+            raise RuntimeError("Ingestion publication is already in progress")
+        return {"document_id": doc_id, "job_id": job_id, "status": "queued", "duplicate": False}
     except Exception:
-        path.unlink(missing_ok=True)
-        registry.update_status(doc_id, registry.FAILED_STATUS, error="Could not queue the file")
+        if not registered:
+            path.unlink(missing_ok=True)
         raise
-    return {"document_id": doc_id, "job_id": job.id, "status": "queued", "duplicate": False}
 
 
 async def chunk_exists(document_id: str, chunk_id: str) -> bool:
@@ -124,7 +138,7 @@ def build_services(inference: InferenceSettings, retrieval, settings: AgentSetti
         summarizer=EvidenceSummarizer(build_llm_call(adapter), counter, batch_tokens=s.summary_batch_tokens, max_depth=s.summary_max_depth),
         search_provider=build_search_provider(s), fetcher=WebFetcher(s), image_provider=build_image_provider(s),
         artifact_store=ArtifactStore(s.artifact_dir, store, max_bytes=s.artifact_max_bytes, ttl_days=s.artifact_ttl_days),
-        document_lookup=registry.get_document, pages_lookup=registry.get_pages,
+        document_lookup=registry.get_document_for_owner, pages_lookup=registry.get_pages_for_owner,
         chunk_exists=chunk_exists, chunk_neighbors=chunk_neighbors, chunk_count=chunk_count, ingest_pdf=ingest_pdf)
     svc.extra["upload_dir"] = str(UPLOAD_DIR)
     return svc, adapter

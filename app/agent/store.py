@@ -29,7 +29,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_approvals_source_user ON approvals(source_
 CREATE TABLE IF NOT EXISTS ingestion_jobs (
   job_id TEXT PRIMARY KEY, source_id TEXT NOT NULL UNIQUE REFERENCES sources(source_id),
   idempotency_key TEXT NOT NULL UNIQUE, document_id TEXT, rq_job_id TEXT,
-  status TEXT NOT NULL, error TEXT, created_at REAL NOT NULL, updated_at REAL NOT NULL);
+  status TEXT NOT NULL, error TEXT, lease_until REAL, created_at REAL NOT NULL, updated_at REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS feedback (
   feedback_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, target_type TEXT NOT NULL, target_id TEXT NOT NULL,
   rating INTEGER NOT NULL, comment TEXT, created_at REAL NOT NULL);
@@ -54,6 +54,14 @@ class AgentStore:
             with self._lock:
                 c.execute("PRAGMA journal_mode=WAL")
                 c.executescript(SCHEMA)
+                columns = {row["name"] for row in c.execute("PRAGMA table_info(ingestion_jobs)")}
+                if "lease_until" not in columns:
+                    c.execute("ALTER TABLE ingestion_jobs ADD COLUMN lease_until REAL")
+                c.execute(
+                    "UPDATE ingestion_jobs SET lease_until=updated_at+300 "
+                    "WHERE status='claimed' AND lease_until IS NULL"
+                )
+                c.commit()
                 self._ready = True
         return c
 
@@ -129,23 +137,44 @@ class AgentStore:
         return ap
 
     def claim_job(self, source_id: str, idempotency_key: str) -> tuple[dict, bool]:
-        """Create the one ingestion job for a source, or return the existing one. (job, created)"""
+        """Create a job or atomically reclaim a claim whose renewable lease expired."""
         now = time.time()
-        try:
-            with closing(self._conn()) as c, c:
+        with closing(self._conn()) as c:
+            c.execute("BEGIN IMMEDIATE")
+            job = c.execute("SELECT * FROM ingestion_jobs WHERE source_id=?", (source_id,)).fetchone()
+            if job is None:
                 c.execute("INSERT INTO ingestion_jobs (job_id,source_id,idempotency_key,status,created_at,updated_at) "
                           "VALUES (?,?,?,?,?,?)", (new_id(), source_id, idempotency_key, "claimed", now, now))
-            created = True
-        except sqlite3.IntegrityError:
-            created = False
-        return self._one("SELECT * FROM ingestion_jobs WHERE source_id=?", (source_id,)), created
+                c.execute("UPDATE ingestion_jobs SET lease_until=? WHERE source_id=?", (now + 300, source_id))
+                c.commit()
+                return self._one("SELECT * FROM ingestion_jobs WHERE source_id=?", (source_id,)), True
+            if job["status"] == "claimed" and (job["lease_until"] is None or job["lease_until"] <= now):
+                changed = c.execute(
+                    "UPDATE ingestion_jobs SET lease_until=?, error=NULL, updated_at=? "
+                    "WHERE job_id=? AND status='claimed' AND (lease_until IS NULL OR lease_until<=?)",
+                    (now + 300, now, job["job_id"], now),
+                ).rowcount
+                c.commit()
+                return self._one("SELECT * FROM ingestion_jobs WHERE source_id=?", (source_id,)), changed == 1
+            c.rollback()
+        return self._one("SELECT * FROM ingestion_jobs WHERE source_id=?", (source_id,)), False
 
     def update_job(self, job_id: str, **fields):
-        allowed = {"document_id", "rq_job_id", "status", "error"}
+        allowed = {"document_id", "rq_job_id", "status", "error", "lease_until"}
         sets = {k: v for k, v in fields.items() if k in allowed}
+        if sets.get("status") != "claimed" and "lease_until" not in sets:
+            sets["lease_until"] = None
         if sets:
             self._write(f"UPDATE ingestion_jobs SET {','.join(k + '=?' for k in sets)},updated_at=? WHERE job_id=?",
                         (*sets.values(), time.time(), job_id))
+
+    def renew_claim(self, job_id: str, lease_seconds: float = 300) -> bool:
+        now = time.time()
+        return self._write(
+            "UPDATE ingestion_jobs SET lease_until=?, updated_at=? "
+            "WHERE job_id=? AND status='claimed' AND lease_until>?",
+            (now + lease_seconds, now, job_id, now),
+        ) == 1
 
     def job_for_source(self, source_id: str) -> dict | None:
         return self._one("SELECT * FROM ingestion_jobs WHERE source_id=?", (source_id,))
@@ -191,5 +220,9 @@ class AgentStore:
 
     def reclaim_failed_job(self, job_id: str) -> bool:
         """Atomically move a failed job back to 'claimed' so exactly one caller resubmits it."""
-        return self._write("UPDATE ingestion_jobs SET status='claimed', error=NULL, updated_at=? WHERE job_id=? AND status='failed'",
-                           (time.time(), job_id)) == 1
+        now = time.time()
+        return self._write(
+            "UPDATE ingestion_jobs SET status='claimed', error=NULL, lease_until=?, updated_at=? "
+            "WHERE job_id=? AND status='failed'",
+            (now + 300, now, job_id),
+        ) == 1

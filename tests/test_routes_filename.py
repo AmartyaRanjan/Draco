@@ -38,7 +38,7 @@ class EmptySafeFilenameTests(unittest.TestCase):
 
     def upload(self, filename):
         file = UploadFile(file=io.BytesIO(b"%PDF-1.7 hello"), filename=filename)
-        return asyncio.run(routes.upload_document(file))
+        return asyncio.run(routes.upload_document(file, "alice"))
 
     def test_path_only_filename_rejected(self):
         with self.assertRaises(HTTPException) as ctx:

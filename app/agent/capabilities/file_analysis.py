@@ -126,7 +126,7 @@ async def analyze_uploaded_file(a: AnalyzeIn, ctx):
     svc = ctx.services
     lookup = require(svc.document_lookup, "Document registry")
     check_scope(ctx, a.document_id)
-    doc = lookup(safe_id(a.document_id))
+    doc = lookup(safe_id(a.document_id), ctx.user_id)
     if doc is None:
         raise CapabilityError(ErrorCode.not_found, "Document not found.")
     root = Path(svc.extra.get("upload_dir", "")).resolve() if svc.extra.get("upload_dir") else None

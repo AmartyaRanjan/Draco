@@ -19,8 +19,8 @@ class Services:
     fetcher: Any = None                            # WebFetcher
     image_provider: Any = None                     # ImageProvider
     artifact_store: Any = None                     # ArtifactStore
-    document_lookup: Callable[[str], dict | None] | None = None       # registry.get_document
-    pages_lookup: Callable[[str], list[dict]] | None = None           # registry.get_pages
+    document_lookup: Callable[[str, str], dict | None] | None = None  # registry.get_document_for_owner
+    pages_lookup: Callable[[str, str], list[dict]] | None = None      # registry.get_pages_for_owner
     chunk_exists: Callable[[str, str], Awaitable[bool]] | None = None  # index existence check
     chunk_neighbors: Callable[..., Awaitable[list[dict]]] | None = None
     chunk_count: Callable[[str], Awaitable[int | None]] | None = None

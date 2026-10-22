@@ -113,10 +113,10 @@ async def get_document_metadata(a: DocMetaIn, ctx):
     svc = ctx.services
     lookup = require(svc.document_lookup, "Document registry")
     check_scope(ctx, a.document_id)
-    doc = lookup(safe_id(a.document_id))
+    doc = lookup(safe_id(a.document_id), ctx.user_id)
     if doc is None:
         raise CapabilityError(ErrorCode.not_found, "Document not found.")
-    pages = (svc.pages_lookup(a.document_id) if svc.pages_lookup else []) or []
+    pages = (svc.pages_lookup(a.document_id, ctx.user_id) if svc.pages_lookup else []) or []
     n_chunks = await svc.chunk_count(a.document_id) if svc.chunk_count else None
     return DocMetaOut(document_id=doc["document_id"], filename=doc["filename"], status=doc["status"],
                       created_at=doc.get("created_at"), content_hash_prefix=(doc.get("content_hash") or "")[:12] or None,
@@ -142,10 +142,14 @@ async def expand_document_context(a: ExpandIn, ctx):
     svc = ctx.services
     fn = require(svc.chunk_neighbors, "Chunk neighbor lookup")
     check_scope(ctx, a.document_id)
+    lookup = require(svc.document_lookup, "Document registry")
+    if lookup(safe_id(a.document_id), ctx.user_id) is None:
+        raise CapabilityError(ErrorCode.not_found, "Document not found.")
     rows = await fn(safe_id(a.document_id), safe_id(a.chunk_id), a.before, a.after)
     if rows is None:
         raise CapabilityError(ErrorCode.not_found, "Chunk not found.")
-    name = svc.document_lookup(a.document_id).get("filename") if svc.document_lookup and svc.document_lookup(a.document_id) else None
+    doc = lookup(a.document_id, ctx.user_id)
+    name = doc.get("filename") if doc else None
     items = [ctx.evidence.add(dict(kind="private", text=r["text"], document_id=r["document_id"], chunk_id=r["chunk_id"],
                                    filename=name, page_start=r.get("page_start"), page_end=r.get("page_end"),
                                    section_path=r.get("section_path"), selection="context_expansion")) for r in rows]
