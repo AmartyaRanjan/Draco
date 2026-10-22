@@ -23,7 +23,8 @@ class DracoSettings(BaseModel):
     state_path: str | None = None  # SQLite file; None = in-memory stores
     trace_path: str | None = None  # JSONL file; None = in-memory trace only
     redact_keys: tuple[str, ...] = ("key", "token", "password", "secret", "authorization")
-    pii_keys: tuple[str, ...] = ("user_id", "tenant_id")  # hashed in traces and persisted events
+    pii_keys: tuple[str, ...] = ("user_id", "tenant_id", "subject", "resource_tenant")  # hashed in traces and persisted events
+    require_identity: bool = False  # True: every protected operation without a trusted Identity is denied
     max_payload_chars: int = Field(default=2000, gt=0)
 
     def limits(self) -> BudgetLimits:

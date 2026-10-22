@@ -9,7 +9,9 @@ from __future__ import annotations
 from typing import Any
 
 from draco.adapters.errors import map_app_error
+from draco.adapters.retrieval import DocumentResource, Evidence, authorize_evidence, authorize_request
 from draco.core.context import ExecutionContext
+from draco.core.errors import PolicyViolation
 from draco.core.protocols import Workload
 from draco.harness.instrument import call_model, emit
 
@@ -32,11 +34,22 @@ def _items(outcome: Any) -> list[dict[str, Any]]:
     return out
 
 
-def retrieval_workload(service: Any) -> Workload:
-    """query -> {items, evidence_sufficient, degraded, trace}. No model call is made."""
+async def _allowed_items(ctx: ExecutionContext, out: Any, document_resource: DocumentResource | None) -> list[dict[str, Any]]:
+    """Items the caller may read; documents are checked after retrieval because the shared index may over-return."""
+    items = _items(out)
+    kept = await authorize_evidence(ctx, [Evidence(i["document_id"], "") for i in items], document_resource)
+    ok = {e.document_id for e in kept}
+    return [i for i in items if i["document_id"] in ok]
+
+
+def retrieval_workload(service: Any, *, document_resource: DocumentResource | None = None) -> Workload:
+    """query -> {items, evidence_sufficient, degraded, trace}. No model call is made.
+    `document_resource` maps a document id to a `Resource` (owner tenant/ACL) so access is authorized
+    before and after retrieval; with an identity-bearing execution and no resolver, document access is denied."""
     async def run(ctx: ExecutionContext, inp: Any) -> dict[str, Any]:
         query, doc_ids = _request(inp)
         ctx.check()
+        await authorize_request(ctx, doc_ids, document_resource)
         try:
             out = await service.retrieve(query, doc_ids, request_id=ctx.execution_id, principal=ctx.user_id)
         except Exception as exc:
@@ -44,23 +57,27 @@ def retrieval_workload(service: Any) -> Workload:
             if mapped is not None:
                 raise mapped from exc
             raise
+        items = await _allowed_items(ctx, out, document_resource)
         out.trace.finish("degraded" if out.degraded else "ok")
-        await emit(ctx, "retrieval.after", selected=len(out.context.items), degraded=list(out.degraded),
-                   stages={k: v["ms"] for k, v in out.trace.stages.items()})
+        await emit(ctx, "retrieval.after", selected=len(items), withheld=len(out.context.items) - len(items),
+                   degraded=list(out.degraded), stages={k: v["ms"] for k, v in out.trace.stages.items()})
         sel = out.selection
-        return {"query": out.query, "items": _items(out), "degraded": list(out.degraded),
+        return {"query": out.query, "items": items, "degraded": list(out.degraded),
                 "evidence_sufficient": bool(sel and sel.evidence_sufficient), "trace": out.trace.as_dict()}
     return run
 
 
-def rag_workload(service: Any) -> Workload:
+def rag_workload(service: Any, *, document_resource: DocumentResource | None = None) -> Workload:
     """query -> grounded answer. Retrieval, then the service's own generator as a budgeted, evented
     model call. Abstains (without a model call) when nothing relevant was retrieved."""
     async def run(ctx: ExecutionContext, inp: Any) -> dict[str, Any]:
         query, doc_ids = _request(inp)
         ctx.check()
+        await authorize_request(ctx, doc_ids, document_resource)
         try:
             out = await service.retrieve(query, doc_ids, request_id=ctx.execution_id, principal=ctx.user_id)
+            if len(await _allowed_items(ctx, out, document_resource)) != len(out.context.items):
+                raise PolicyViolation("retrieved evidence includes documents the caller may not read")  # before any generation
             base = {"query": out.query, "degraded": list(out.degraded)}
             if not out.context.items:
                 out.trace.set(abstained="no_evidence")

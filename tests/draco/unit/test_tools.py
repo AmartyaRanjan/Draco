@@ -1,7 +1,6 @@
 import asyncio
 
 import pytest
-from app.agent.registry import CapabilityContext
 from pydantic import BaseModel, Field
 
 from draco.core import BudgetLimits, DracoSettings, ExecutionContext, Policy, Status
@@ -127,19 +126,14 @@ async def test_default_policy_denies_execution_even_when_tool_name_is_known():
     denied = await rt.call(denied_ctx, "add", {"a": 1, "b": 2})
     assert denied.error.code == ErrorCode.denied
 
-    # The registry is also directly callable; native handlers enforce the same policy there.
-    cap_ctx = CapabilityContext(user_id="tester", trace_id="direct", services=h.services,
-                                evidence=None, permissions=denied_ctx.policy.permissions,
-                                scratch={"draco_ctx": denied_ctx})
-    direct_denied = await reg.execute("add", {"a": 1, "b": 2}, cap_ctx)
+    # a handler reached without ToolRuntime.call enforces the same policy
+    from draco.tools import execute_tool
+    direct_denied = await execute_tool(reg.get("add"), "add", {"a": 1, "b": 2}, denied_ctx)
     assert direct_denied.error.code == ErrorCode.denied
 
     _, allowed_ctx = ctx_for(Policy(allowed_tools=frozenset({"add"})))
-    allowed_cap_ctx = CapabilityContext(user_id="tester", trace_id="direct", services=h.services,
-                                        evidence=None, permissions=allowed_ctx.policy.permissions,
-                                        scratch={"draco_ctx": allowed_ctx})
     assert (await rt.call(allowed_ctx, "add", {"a": 1, "b": 2})).status == "success"
-    assert (await reg.execute("add", {"a": 1, "b": 2}, allowed_cap_ctx)).status == "success"
+    assert (await execute_tool(reg.get("add"), "add", {"a": 1, "b": 2}, allowed_ctx)).status == "success"
 
 
 async def test_retry_only_non_mutating_and_charged():

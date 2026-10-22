@@ -1,4 +1,4 @@
-"""Optional MCP integration: expose tools of a connected MCP client as registry capabilities.
+"""Optional MCP integration: expose tools of a connected MCP client as tools.
 
 Duck-typed against the client surface shared by `mcp.Client` and `mcp.ClientSession`
 (`await list_tools()`, `await call_tool(name, arguments)`), so the core never imports the `mcp`
@@ -14,12 +14,13 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from app.agent.contracts import CapabilityError, ErrorCode
-from app.agent.registry import Capability, CapabilityContext, CapabilityRegistry
-from app.agent.web import looks_injected
 from pydantic import BaseModel, ConfigDict, create_model
 
+from draco.core.context import ExecutionContext
 from draco.core.errors import ContractError
+from draco.tools.contracts import ErrorCode, Tool, ToolFailure
+from draco.tools.registry import ToolRegistry
+from draco.tools.safety import looks_injected
 
 _NAME_OK = re.compile(r"[^A-Za-z0-9_-]")
 _CTRL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
@@ -62,7 +63,7 @@ class McpOutput(BaseModel):
     structured: Any = None
 
 
-async def register_mcp_tools(registry: CapabilityRegistry, client: Any, *, server_name: str, allow: set[str],
+async def register_mcp_tools(registry: ToolRegistry, client: Any, *, server_name: str, allow: set[str],
                              permissions: frozenset[str] | set[str] = frozenset({"mcp"}),
                              timeout_s: float = 30.0, max_text_chars: int = 8000,
                              requires_approval: bool = False) -> list[str]:
@@ -87,11 +88,11 @@ async def register_mcp_tools(registry: CapabilityRegistry, client: Any, *, serve
         in_model = input_model_from_schema(local, schema)
 
         def make_handler(remote_name: str):
-            async def handler(args: BaseModel, ctx: CapabilityContext) -> McpOutput:
+            async def handler(args: BaseModel, ctx: ExecutionContext) -> McpOutput:
                 res = await client.call_tool(remote_name, args.model_dump(exclude_none=True))
                 if _get(res, "is_error", "isError", default=False):
                     # remote error text is untrusted and may contain internals: report generically
-                    raise CapabilityError(ErrorCode.upstream_error, f"Remote tool '{remote_name}' reported an error")
+                    raise ToolFailure(ErrorCode.upstream_error, f"Remote tool '{remote_name}' reported an error")
                 texts: list[str] = []
                 for item in _get(res, "content", default=[]):
                     t = _get(item, "text")
@@ -99,7 +100,7 @@ async def register_mcp_tools(registry: CapabilityRegistry, client: Any, *, serve
                 return McpOutput(content=texts, structured=_get(res, "structured_content", "structuredContent"))
             return handler
 
-        registry.register(Capability(
+        registry.register(Tool(
             name=local, group=f"mcp:{server}", description=sanitize_description(_get(tool, "description")),
             input_model=in_model, output_model=McpOutput, handler=make_handler(remote),
             permissions=frozenset(permissions), mutates_state=True,  # unknown side effects: no auto-retry
