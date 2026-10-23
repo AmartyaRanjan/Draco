@@ -4,7 +4,7 @@ from __future__ import annotations
 import inspect
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from draco.agents.registry import AgentRegistry, AgentSpec
 from draco.core.context import ExecutionContext
@@ -97,12 +97,14 @@ class Router:
 
     async def decide(self, ctx: ExecutionContext, req: RouteRequest) -> RoutingDecision:
         for strat in self.strategies:
-            d = strat(ctx, req, self.registry)
-            if inspect.isawaitable(d):
-                d = await d
-            if d is not None:
-                self._validate(ctx, d.destination)
-                return d
+            raw = strat(ctx, req, self.registry)
+            if inspect.isawaitable(raw):
+                decision = await cast(Awaitable[RoutingDecision | None], raw)
+            else:
+                decision = cast(RoutingDecision | None, raw)
+            if decision is not None:
+                self._validate(ctx, decision.destination)
+                return decision
         if self.default_agent:
             self._validate(ctx, self.default_agent)
             return RoutingDecision(self.default_agent, "default agent", strategy="default")

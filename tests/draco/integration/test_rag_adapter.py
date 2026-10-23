@@ -47,6 +47,7 @@ def owned_documents(tmp_path, monkeypatch):
     registry.init_db()
     for document_id in ("d1", "d2", "d3"):
         registry.create_document(document_id, f"{document_id}.pdf", f"/{document_id}", "tester")
+        registry.update_status(document_id, "completed")
 
 
 async def test_retrieval_through_harness_uses_execution_id_and_traces(owned_documents):

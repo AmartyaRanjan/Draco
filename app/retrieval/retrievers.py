@@ -5,6 +5,7 @@ import threading
 
 from qdrant_client import models
 
+from app.core.blocking import run_blocking
 from app.db import opensearch as os_db
 from app.db import qdrant as qd_db
 from app.ingestion import embed
@@ -49,10 +50,9 @@ class DenseRetriever:
 
     async def retrieve(self, query, document_ids, trace) -> list[Candidate]:
         with trace.stage("query_embedding"):
-            vector = await asyncio.to_thread(_embed_query, query)
+            vector = await run_blocking(_embed_query, query, timeout=self.timeout_s)
         with trace.stage("qdrant_query"):
-            return await asyncio.wait_for(
-                asyncio.to_thread(self._search, vector, document_ids), self.timeout_s)
+            return await run_blocking(self._search, vector, document_ids, timeout=self.timeout_s)
 
 
 class LexicalRetriever:
@@ -76,5 +76,4 @@ class LexicalRetriever:
 
     async def retrieve(self, query, document_ids, trace) -> list[Candidate]:
         with trace.stage("opensearch_query"):
-            return await asyncio.wait_for(
-                asyncio.to_thread(self._search, query, document_ids), self.timeout_s)
+            return await run_blocking(self._search, query, document_ids, timeout=self.timeout_s)

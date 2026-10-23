@@ -5,6 +5,7 @@ fails over to a per-process in-memory bucket instead of failing open completely 
 circuit breaker stops every request paying a connect timeout while Redis is away.
 """
 import logging
+import ipaddress
 import threading
 import time
 from dataclasses import dataclass
@@ -72,6 +73,10 @@ class MemoryLimiter:
 
 class RedisLimiter:
     BREAKER_S = 5.0
+    # These policies protect expensive or security-sensitive operations. A
+    # local fallback would multiply their budget across workers during a Redis
+    # outage, so reject them until the shared limiter is healthy again.
+    FAIL_CLOSED_POLICIES = frozenset({"authfail", "upload", "heavy"})
 
     def __init__(self, url: str, fallback: MemoryLimiter | None = None):
         import redis.asyncio as aredis
@@ -82,6 +87,8 @@ class RedisLimiter:
 
     async def hit(self, policy: str, key: str, per_minute: float, burst: float, cost: float = 1) -> Decision:
         if time.monotonic() < self._down_until:
+            if policy in self.FAIL_CLOSED_POLICIES:
+                return Decision(False, int(burst), 0, self.BREAKER_S)
             return await self._fallback.hit(policy, key, per_minute, burst, cost)
         try:
             ok, tokens, retry = await self._script(keys=[f"rl:{policy}:{key}"], args=[per_minute / 60.0, burst, cost])
@@ -90,6 +97,8 @@ class RedisLimiter:
             self._down_until = time.monotonic() + self.BREAKER_S
             obs.RATE_LIMIT_BACKEND_ERRORS.inc()
             logger.warning("ratelimit_backend_unavailable", extra={"error": type(exc).__name__})
+            if policy in self.FAIL_CLOSED_POLICIES:
+                return Decision(False, int(burst), 0, self.BREAKER_S)
             return await self._fallback.hit(policy, key, per_minute, burst, cost)
 
 
@@ -112,9 +121,23 @@ def set_limiter(limiter) -> None:
 def client_ip_from(headers, peer: str | None) -> str:
     """Peer address, or the address our own proxies saw. X-Forwarded-For is attacker-controlled, so it is only
     read when TRUSTED_PROXY_HOPS says how many entries from the right were appended by our infrastructure."""
-    hops = get_platform_settings().trusted_proxy_hops
+    settings = get_platform_settings()
+    hops = settings.trusted_proxy_hops
     xff = headers.get("x-forwarded-for")
-    if hops > 0 and xff:
+    peer_is_trusted = False
+    if peer and settings.trusted_proxy_cidrs:
+        try:
+            peer_address = ipaddress.ip_address(peer)
+            peer_is_trusted = any(
+                peer_address in (
+                    network if hasattr(network, "subnet_of")
+                    else ipaddress.ip_network(network, strict=False)
+                )
+                for network in settings.trusted_proxy_cidrs
+            )
+        except (TypeError, ValueError):
+            peer_is_trusted = False
+    if hops > 0 and peer_is_trusted and xff:
         parts = [p.strip() for p in xff.split(",") if p.strip()]
         if len(parts) >= hops:
             return parts[-hops]
