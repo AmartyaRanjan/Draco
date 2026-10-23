@@ -22,6 +22,7 @@ async def main():
     with tempfile.TemporaryDirectory() as tmp, patch.object(registry, "DB_PATH", Path(tmp) / "documents.db"):
         registry.init_db()
         registry.create_document("handbook", "handbook.pdf", "/handbook.pdf", "alice")
+        registry.update_status("handbook", "completed")
         h = Harness()
         h.register("rag", rag_workload(retrieval_service()))
         r = await h.run("rag", "How are tools protected?", user_id="alice", session_id="s1")

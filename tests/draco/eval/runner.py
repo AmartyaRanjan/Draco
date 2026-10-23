@@ -148,6 +148,7 @@ async def eval_rag(case: dict[str, Any]) -> list[str]:
     with tempfile.TemporaryDirectory() as tmp, patch.object(registry, "DB_PATH", pathlib.Path(tmp) / "documents.db"):
         registry.init_db()
         registry.create_document("d1", "d1.pdf", "/d1", "eval")
+        registry.update_status("d1", "completed")
         svc = RetrievalService(
             settings(), dense=retr(case["dense"], "dense", "q"), lexical=retr(case["lexical"], "bm25", "o"),
             reranker=FakeReranker(), counter=TokenCounter(None),

@@ -1,5 +1,6 @@
 """Durable publication of persisted documents to the RQ ingestion queue."""
 import logging
+import os
 
 from rq.exceptions import DuplicateJobError
 
@@ -8,6 +9,7 @@ from app.ingestion.worker import process_document
 
 logger = logging.getLogger("rag.ingestion")
 _ACTIVE_QUEUE_STATES = {"queued", "started", "deferred", "scheduled"}
+PDF_JOB_TIMEOUT_S = max(1, int(os.getenv("PDF_JOB_TIMEOUT_S", "900")))
 
 
 def _queue_status(job):
@@ -59,7 +61,7 @@ def submit_document(document_id, queue):
             process_document,
             document_id,
             document["file_path"],
-            job_timeout=3600,
+            job_timeout=PDF_JOB_TIMEOUT_S,
             result_ttl=86400,
             job_id=claim["queue_job_id"],
         )

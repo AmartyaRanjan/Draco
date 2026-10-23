@@ -53,7 +53,7 @@ class AgentSettings:
     # file analysis
     analysis_max_bytes: int
 
-    def validate(self) -> "AgentSettings":
+    def validate(self, *, production: bool = False) -> "AgentSettings":
         if not 0.3 <= self.evidence_compaction_ratio <= 1.0:
             raise ValueError("AGENT_EVIDENCE_COMPACTION_RATIO must be in [0.3, 1.0].")
         if min(self.max_tool_calls, self.max_retrieval_attempts, self.max_llm_steps) < 1:
@@ -64,6 +64,8 @@ class AgentSettings:
             raise ValueError("AGENT_MAX_MODE_CHANGES must be >= 0.")
         if self.summary_target_tokens < 64 or self.summary_batch_tokens < 256:
             raise ValueError("Summary budgets too small.")
+        if production and self.web_allow_private_hosts:
+            raise ValueError("WEB_ALLOW_PRIVATE_HOSTS=true is not allowed in production.")
         return self
 
 

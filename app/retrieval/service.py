@@ -4,7 +4,8 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 
-from app.db.registry import get_document, list_document_ids_for_owner
+from app.db.registry import DocumentScopeTooLarge, get_document, list_document_ids_for_owner
+from app.core.blocking import run_blocking
 from app.retrieval import fusion
 from app.retrieval.context import BuiltContext, TokenCounter, build_context
 from app.retrieval.generator import SYSTEM, WEAK_NOTE
@@ -34,7 +35,10 @@ def resolve_filters(requested_document_ids: list[str] | None, principal=None) ->
     """Intersect client filters with the authenticated principal's owned documents."""
     if not isinstance(principal, str) or not principal.strip():
         return []
-    return list_document_ids_for_owner(principal, requested_document_ids)
+    try:
+        return list_document_ids_for_owner(principal, requested_document_ids)
+    except DocumentScopeTooLarge as exc:
+        raise RetrievalError(str(exc), "request_validation", 413) from exc
 
 
 class RetrievalService:
@@ -108,7 +112,9 @@ class RetrievalService:
                 return RetrievalOutcome(trace.request_id, q, None, BuiltContext(), trace, degraded)
             with trace.stage("colbert_rerank"):
                 try:
-                    ranked, rstats = await asyncio.to_thread(self.reranker.rerank, q, fused)
+                    ranked, rstats = await run_blocking(
+                        self.reranker.rerank, q, fused, timeout=s.dense_timeout_s
+                    )
                 except Exception as exc:
                     raise RetrievalError("Reranking failed", "colbert_rerank", 500) from exc
             trace.set(**{"reranked": rstats["reranked"], "rerank_batches": rstats["batches"],

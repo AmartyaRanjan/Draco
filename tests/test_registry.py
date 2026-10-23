@@ -74,12 +74,14 @@ class OwnershipTests(RegistryTestCase):
         registry.create_document("alice-doc", "a.pdf", "/a", "alice")
         registry.create_document("bob-doc", "b.pdf", "/b", "bob")
         registry.create_document("legacy-doc", "l.pdf", "/l")
+        for document_id in ("alice-doc", "bob-doc", "legacy-doc"):
+            registry.update_status(document_id, "completed")
 
         self.assertEqual(registry.list_document_ids_for_owner("alice"), ["alice-doc"])
         self.assertEqual(registry.list_document_ids_for_owner("alice", ["bob-doc", "alice-doc", "legacy-doc"]), ["alice-doc"])
         self.assertEqual(registry.list_document_ids_for_owner(None), [])
         self.assertEqual(registry.list_documents_for_owner("alice"), [
-            {"document_id": "alice-doc", "filename": "a.pdf", "status": "uploaded"},
+            {"document_id": "alice-doc", "filename": "a.pdf", "status": "completed"},
         ])
         self.assertEqual(registry.list_documents_for_owner(None), [])
         self.assertIsNone(registry.get_document_for_owner("bob-doc", "alice"))
@@ -101,7 +103,24 @@ class OwnershipTests(RegistryTestCase):
         with self.assertRaises(ValueError):
             registry.assign_unowned_documents("alice", 0)
         self.assertEqual(registry.assign_unowned_documents("alice", 1), 1)
+        registry.update_status("legacy-doc", "completed")
         self.assertEqual(registry.list_document_ids_for_owner("alice"), ["legacy-doc"])
+
+    def test_retrieval_scope_excludes_incomplete_documents(self):
+        registry.create_document("uploaded", "u.pdf", "/u", "alice")
+        registry.create_document("failed", "f.pdf", "/f", "alice")
+        registry.create_document("completed", "c.pdf", "/c", "alice")
+        registry.update_status("failed", "failed")
+        registry.update_status("completed", "completed")
+        self.assertEqual(registry.list_document_ids_for_owner("alice"), ["completed"])
+
+    def test_retrieval_scope_is_bounded(self):
+        with patch.object(registry, "MAX_RETRIEVAL_DOCUMENTS", 2):
+            for document_id in ("a", "b", "c"):
+                registry.create_document(document_id, "x.pdf", "/x", "alice")
+                registry.update_status(document_id, "completed")
+            with self.assertRaises(registry.DocumentScopeTooLarge):
+                registry.list_document_ids_for_owner("alice")
 
 
 class MigrationTests(unittest.TestCase):

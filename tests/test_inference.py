@@ -83,6 +83,7 @@ class Harness(unittest.TestCase):
         registry.init_db()
         for document_id in ("d1", "d2", "d3"):
             registry.create_document(document_id, f"{document_id}.pdf", f"/{document_id}", "alice")
+            registry.update_status(document_id, "completed")
         self.store = SqliteConversationStore(Path(tmp.name) / "c.db")
         self.log = []
 

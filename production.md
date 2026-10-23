@@ -134,7 +134,8 @@ Full annotated list: [.env.platform.example](.env.platform.example) (platform), 
 | `RATE_LIMIT_HEAVY/UPLOAD/READ/IP/AUTHFAIL` | see 2.1 | `per_minute,burst` |
 | `REDIS_URL` | `redis://localhost:6379/0` | shared by RQ and the limiter. Give Redis persistence (AOF) if lost rate-limit state matters; losing it only resets buckets |
 | `LLM_MAX_CONCURRENT` / `LLM_QUEUE_WAIT_S` | `4` / `10` | match vLLM `--max-num-seqs`: about 2x it, so a request is always ready as one finishes |
-| `TRUSTED_PROXY_HOPS` | `0` | set to the number of proxies in front of the app |
+| `TRUSTED_PROXY_HOPS` / `TRUSTED_PROXY_CIDRS` | `0` / empty | hops are accepted only from peers inside the configured proxy networks |
+| `MAX_RETRIEVAL_DOCUMENTS` | `1000` | hard cap for an unscoped owner retrieval request |
 | `MAX_BODY_BYTES` / `MAX_UPLOAD_BYTES` | 1 MiB / 101 MiB | |
 | `CORS_ORIGINS` | empty (off) | explicit list only |
 | `METRICS_TOKEN` | none | bearer token for `/metrics` |
@@ -196,16 +197,16 @@ Reading: **retrieval is GPU-serial at about 2.9 req/s** (the BGE-M3 + ColBERT lo
 
 Ordered by how likely they are to matter.
 
-1. **No per-user document access control.** Any authenticated user can retrieve any indexed document. The registry has no owner column and the retrieval filter is `document_ids` only (it narrows, it does not authorise). Do not put documents with different audiences in one deployment until this exists.
+1. **Legacy/index migration required for document visibility.** New retrieval requests are owner-scoped and only include `completed` documents, but existing Qdrant/OpenSearch chunks must be re-indexed after ownership or publication-schema changes. Keep legacy ownerless rows unavailable until an operator explicitly assigns them.
 2. **Prompt injection is mitigated, not solved.** See 2.10 and [evals.md](evals.md) for the measured residual. In particular, a poisoned *private* corpus chunk is still presented to the model; the agent then reports conflicting sources rather than trusting either (a measured behaviour, not a guarantee).
 3. **Retrieval quality depends on how users phrase questions.** Questions prefixed with a long document descriptor ("In the 2DOF ... roadmap, ...") retrieve markedly worse (hit@5 0.79 vs 0.97 once the prefix is removed). Tiny chunks that lose their context (a CGPA line without the person's name) are missed by the agent path. Fixes (contextual chunk headers, query rewriting on the plain `/chat` path) change ingestion and need re-indexing; they were not done.
 4. **The two large PDFs in `documents/` are not indexed** (a 548-page and a 673-page book are `queued`; Docling is not installed in this environment). All measurements are on the 7 indexed PDFs (280 chunks). Production corpora will be larger and noisier than anything measured here.
 5. **TLS, authentication of `/metrics`, WAF and DDoS protection are the reverse proxy's job** and are not configured in this repository. Do not expose the app port directly.
 6. **Single-host data stores.** SQLite files, one Qdrant, one OpenSearch, one Redis, one GPU shared with other tenants on this machine (measured load average 15 to 185 during testing; see 4). No replication, failover, or automated backup.
-7. **Uploaded PDFs are parsed by Docling with no sandbox or per-file resource limit** beyond a 3600 s RQ timeout. A malicious PDF is an attack on the worker.
+7. **Uploaded PDFs are parsed by Docling in the worker process.** Preflight limits now reject oversized files, excessive page counts, and image-heavy pages, and the default RQ timeout is 900 s. A dedicated worker container with OS-level memory/CPU limits is still required for hostile PDFs.
 8. **Docker image and CI workflow are untested.** Neither was built or run; the Dockerfile pins Python 3.14 and omits Docling and CUDA, which the worker image needs.
 9. **Rate limits are starting values**, chosen from measured service times, not from real traffic.
-10. **The in-memory fallback limiter is per process**, so with N processes and Redis down the effective limit is N times higher until Redis returns.
+10. **Read-policy limiter fallback is per process** when Redis is down. High-risk `authfail`, `upload`, and `heavy` policies now fail closed until the shared limiter returns; read traffic remains bounded per process for availability.
 11. **Auth is a static API-key list.** No expiry, no scopes, no audit log beyond the access log. Fine for service-to-service clients, thin for people.
 12. **Conversation history and agent state have no retention job** except `scripts/agent_maintenance.py` for artifacts and feedback.
 

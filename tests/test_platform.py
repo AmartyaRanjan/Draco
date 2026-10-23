@@ -1,6 +1,7 @@
 """HTTP platform layer: rate limiting, auth lockout, body caps, request ids, health, metrics, LLM admission."""
 import asyncio
 import dataclasses
+import ipaddress
 import tempfile
 import unittest
 from contextlib import ExitStack
@@ -68,12 +69,17 @@ class MemoryLimiterTests(unittest.TestCase):
 
 
 class RedisFailoverTests(unittest.TestCase):
-    def test_unreachable_redis_falls_back_to_memory_and_trips_breaker(self):
+    def test_unreachable_redis_fails_closed_for_expensive_policies(self):
         lim = ratelimit.RedisLimiter("redis://127.0.0.1:1/0")  # nothing listens here
-        self.assertTrue(asyncio.run(lim.hit("p", "k", 60, 2)).allowed)
+        self.assertFalse(asyncio.run(lim.hit("heavy", "k", 60, 2)).allowed)
         self.assertGreater(lim._down_until, 0)  # breaker open: later calls skip the connect attempt
-        self.assertTrue(asyncio.run(lim.hit("p", "k", 60, 2)).allowed)
-        self.assertFalse(asyncio.run(lim.hit("p", "k", 60, 2)).allowed)  # still limited, by the in-memory bucket
+        self.assertFalse(asyncio.run(lim.hit("heavy", "k", 60, 2)).allowed)
+
+    def test_unreachable_redis_keeps_low_risk_reads_on_bounded_fallback(self):
+        lim = ratelimit.RedisLimiter("redis://127.0.0.1:1/0")
+        self.assertTrue(asyncio.run(lim.hit("read", "k", 60, 2)).allowed)
+        self.assertTrue(asyncio.run(lim.hit("read", "k", 60, 2)).allowed)
+        self.assertFalse(asyncio.run(lim.hit("read", "k", 60, 2)).allowed)
 
     def test_real_redis_shares_one_budget(self):
         import redis
@@ -156,11 +162,13 @@ class RateLimitApiTests(ApiTestBase):
         self.assertEqual(codes[2], 429)
 
     def test_forwarded_for_ignored_unless_proxies_are_trusted(self):
-        ip = lambda hops: (setattr(self, "cfg", settings(trusted_proxy_hops=hops)),
+        ip = lambda hops, cidrs=(): (setattr(self, "cfg", settings(trusted_proxy_hops=hops, trusted_proxy_cidrs=cidrs)),
                            ratelimit.client_ip_from({"x-forwarded-for": "6.6.6.6, 10.0.0.9"}, "10.0.0.1"))[1]
         self.assertEqual(ip(0), "10.0.0.1")   # spoofable header is not trusted by default
-        self.assertEqual(ip(1), "10.0.0.9")   # the entry our own proxy appended
-        self.assertEqual(ip(5), "10.0.0.1")   # fewer entries than hops: use the peer
+        self.assertEqual(ip(1), "10.0.0.1")   # no proxy CIDR means fail closed
+        proxy_network = (ipaddress.ip_network("10.0.0.0/8"),)
+        self.assertEqual(ip(1, proxy_network), "10.0.0.9")
+        self.assertEqual(ip(5, proxy_network), "10.0.0.1")   # fewer entries than hops: use the peer
 
     def test_disabled_limiter_lets_everything_through(self):
         self.cfg = settings(rate_limit_enabled=False)

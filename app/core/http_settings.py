@@ -1,5 +1,6 @@
 """Process-level settings for the HTTP layer: environment, limits, CORS, proxies. Read once, validated at startup."""
 import os
+import ipaddress
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -29,6 +30,7 @@ class PlatformSettings:
     max_body_bytes: int            # every route except uploads
     max_upload_bytes: int
     trusted_proxy_hops: int        # how many X-Forwarded-For entries (from the right) are our own proxies
+    trusted_proxy_cidrs: tuple     # network ranges allowed to send forwarded headers
     rate_limit_enabled: bool
     redis_url: str
     policies: dict                 # name -> (per_minute, burst)
@@ -48,6 +50,10 @@ class PlatformSettings:
             raise ValueError("Body limits: MAX_BODY_BYTES >= 1024 and MAX_UPLOAD_BYTES >= MAX_BODY_BYTES.")
         if self.llm_max_concurrent < 1 or self.llm_queue_wait_s < 0:
             raise ValueError("LLM_MAX_CONCURRENT must be >= 1 and LLM_QUEUE_WAIT_S >= 0.")
+        if self.trusted_proxy_hops < 0:
+            raise ValueError("TRUSTED_PROXY_HOPS must be >= 0.")
+        if self.trusted_proxy_hops and not self.trusted_proxy_cidrs:
+            raise ValueError("TRUSTED_PROXY_CIDRS is required when TRUSTED_PROXY_HOPS > 0.")
         if self.production:
             if auth_disabled:
                 raise ValueError("APP_AUTH_DISABLED=true is not allowed when APP_ENV=production.")
@@ -60,6 +66,11 @@ class PlatformSettings:
 
 @lru_cache
 def get_platform_settings() -> PlatformSettings:
+    trusted_proxy_cidrs = tuple(
+        ipaddress.ip_network(raw.strip(), strict=False)
+        for raw in os.getenv("TRUSTED_PROXY_CIDRS", "").split(",")
+        if raw.strip()
+    )
     return PlatformSettings(
         env=os.getenv("APP_ENV", "development").strip().lower(),
         log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
@@ -68,6 +79,7 @@ def get_platform_settings() -> PlatformSettings:
         max_body_bytes=int(os.getenv("MAX_BODY_BYTES", str(1024 * 1024))),
         max_upload_bytes=int(os.getenv("MAX_UPLOAD_BYTES", str(101 * 1024 * 1024))),
         trusted_proxy_hops=int(os.getenv("TRUSTED_PROXY_HOPS", "0")),
+        trusted_proxy_cidrs=trusted_proxy_cidrs,
         rate_limit_enabled=_b("RATE_LIMIT_ENABLED", "true"),
         redis_url=os.getenv("REDIS_URL", "redis://localhost:6379/0"),
         policies={

@@ -40,6 +40,8 @@ class DocumentOwnershipTests(unittest.TestCase):
         registry.create_document("alice-doc", "alice.pdf", "/private/alice.pdf", "alice")
         registry.create_document("bob-doc", "bob.pdf", "/private/bob.pdf", "bob")
         registry.create_document("legacy-doc", "legacy.pdf", "/private/legacy.pdf")
+        for document_id in ("alice-doc", "bob-doc", "legacy-doc"):
+            registry.update_status(document_id, "completed")
 
     def test_filters_are_intersected_with_owner_and_fail_closed(self):
         self.assertEqual(resolve_filters(None, "alice"), ["alice-doc"])
