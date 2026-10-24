@@ -5,19 +5,26 @@ empty inspection then crashes downstream: PdfInspection.digital_ratio divides
 by zero, convert_pdf divides by len(page_ocr), and all_digital is vacuously
 True for zero pages. Sampling limits must be rejected early and empty
 inspections must not crash.
+
+Policy limits (bytes, document pages, images per page) must raise
+PdfPolicyError, which convert_pdf re-raises instead of "converting anyway
+with OCR" — the fallback that made the limits bypassable.
 """
 import unittest
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
+from app.ingestion import pdf_detector
 from app.ingestion.pdf_detector import (
     DetectorConfig,
     PdfDetectionError,
     PdfInspection,
+    PdfPolicyError,
     _sample_indices,
     inspect_pdf,
 )
-from tests.pdf_factory import write_pdf
+from tests.pdf_factory import LARGE_IMAGE, write_pdf
 
 
 class DetectorSamplingValidationTests(unittest.TestCase):
@@ -50,6 +57,36 @@ class DetectorSamplingValidationTests(unittest.TestCase):
             with self.assertRaises(PdfDetectionError) as ctx:
                 inspect_pdf(path, DetectorConfig(max_document_pages=1))
             self.assertIn("page", str(ctx.exception).lower())
+
+    def test_page_limit_raises_pdf_policy_error(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = write_pdf(Path(temp) / "many.pdf", [{"text": "page"}] * 2)
+            with self.assertRaises(PdfPolicyError) as ctx:
+                inspect_pdf(path, DetectorConfig(max_document_pages=1))
+            self.assertIsInstance(ctx.exception, PdfDetectionError)
+            self.assertIn("limit", str(ctx.exception))
+
+    def test_byte_limit_raises_pdf_policy_error(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = write_pdf(Path(temp) / "doc.pdf", [{"text": "page"}])
+            with patch.object(pdf_detector, "MAX_PDF_BYTES", 10):
+                with self.assertRaises(PdfPolicyError):
+                    inspect_pdf(path)
+
+    def test_image_limit_raises_pdf_policy_error(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = write_pdf(Path(temp) / "img.pdf", [{"image": LARGE_IMAGE}])
+            with self.assertRaises(PdfPolicyError):
+                inspect_pdf(path, DetectorConfig(max_images_per_page=0))
+
+    def test_malformed_pdf_still_raises_plain_detection_error(self):
+        path = Path("does-not-matter.pdf")
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "bad.pdf"
+            path.write_bytes(b"not a pdf")
+            with self.assertRaises(PdfDetectionError) as ctx:
+                inspect_pdf(path)
+            self.assertNotIsInstance(ctx.exception, PdfPolicyError)
 
 
 if __name__ == "__main__":

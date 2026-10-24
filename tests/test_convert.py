@@ -110,6 +110,18 @@ class ConvertRoutingTests(ConvertTestCase):
             convert.convert_document("whatever.pdf")
         self.assert_ocr(True)
 
+    def test_policy_limit_rejection_is_never_converted(self):
+        # A structural-limit rejection must propagate, not fall back to OCR:
+        # converting the rejected file anyway would defeat the limit.
+        from app.ingestion.pdf_detector import PdfPolicyError
+
+        with patch.object(
+            convert, "inspect_pdf", side_effect=PdfPolicyError("PDF has 3 pages; limit is 1")
+        ):
+            with self.assertRaises(PdfPolicyError):
+                convert.convert_document("whatever.pdf")
+        self.converter.convert.assert_not_called()
+
     def test_returns_docling_document(self):
         result = convert.convert_document(self.make_pdf([DIGITAL]))
         self.assertIs(result, self.converter.convert.return_value.document)
