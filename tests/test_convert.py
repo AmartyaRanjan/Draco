@@ -26,6 +26,7 @@ if not DOCLING_INSTALLED:
         sys.modules[name] = MagicMock()
 
 from app.ingestion import convert  # noqa: E402
+
 from tests.pdf_factory import LARGE_IMAGE, LONG_TEXT, write_pdf  # noqa: E402
 
 DIGITAL = {"text": LONG_TEXT}

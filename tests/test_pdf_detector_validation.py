@@ -10,8 +10,8 @@ Policy limits (bytes, document pages, images per page) must raise
 PdfPolicyError, which convert_pdf re-raises instead of "converting anyway
 with OCR" — the fallback that made the limits bypassable.
 """
-import unittest
 import tempfile
+import unittest
 from pathlib import Path
 from unittest.mock import patch
 
@@ -24,6 +24,7 @@ from app.ingestion.pdf_detector import (
     _sample_indices,
     inspect_pdf,
 )
+
 from tests.pdf_factory import LARGE_IMAGE, write_pdf
 
 

@@ -1,8 +1,8 @@
-import sqlite3
 import os
+import sqlite3
+import time
 from contextlib import closing
 from pathlib import Path
-import time
 
 DB_PATH = Path(__file__).resolve().parents[1] / "storage" / "documents.db"
 MAX_RETRIEVAL_DOCUMENTS = int(os.getenv("MAX_RETRIEVAL_DOCUMENTS", "1000"))

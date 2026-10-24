@@ -5,10 +5,9 @@ from pathlib import Path
 from threading import Event, Thread
 from unittest.mock import patch
 
-from rq.exceptions import DuplicateJobError
-
 from app.db import registry
 from app.ingestion.dispatch import reconcile_ingestion_outbox, submit_document
+from rq.exceptions import DuplicateJobError
 
 
 class FakeJob:
