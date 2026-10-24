@@ -45,6 +45,9 @@ def submit_document(document_id, queue):
         if status == "finished" and document["status"] == "completed":
             return outbox["queue_job_id"]
         registry.requeue_missing_ingestion(document_id)
+        if registry.get_ingestion_outbox(document_id)["state"] == "failed":
+            # Attempt budget exhausted: terminal, nothing further is enqueued.
+            return None
 
     claim = registry.claim_ingestion_outbox(document_id)
     if claim is None:
