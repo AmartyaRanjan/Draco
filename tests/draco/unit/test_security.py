@@ -190,3 +190,83 @@ async def test_audit_events_pseudonymise_subject_and_tenant_in_traces_and_persis
     persisted = str(await h.store.list_events(r.execution_id))
     for dump in (trace, persisted):
         assert "security.allowed" in dump and "alice" not in dump and "acme" not in dump
+
+
+async def test_resume_restores_the_stored_policy_and_cannot_widen_it():
+    h = Harness(DracoSettings())
+    n = {"c": 0}
+    seen = []
+
+    async def flaky(ctx, inp):
+        n["c"] += 1
+        seen.append(ctx.policy)
+        if n["c"] == 1:
+            raise RuntimeError("boom")
+        return "done"
+    h.register("flaky", flaky)
+    pol = Policy(permissions=frozenset({"read"}), allowed_tools=frozenset({"a"}))
+    r = await h.run("flaky", identity=ALICE, policy=pol)
+    rec = await h.store.get_execution(r.execution_id)
+    assert Policy.from_dict(rec.policy) == pol
+    with pytest.raises(PolicyViolation):  # a more permissive policy on resume is refused
+        await h.resume(r.execution_id, identity=ALICE, policy=Policy(allowed_tools=frozenset({"a", "b"})))
+    assert (await h.resume(r.execution_id, identity=ALICE)).status == Status.completed
+    assert seen[-1] == pol  # restored, not reset to the default
+
+
+async def test_policy_survives_sqlite_round_trip(tmp_path):
+    from draco.state.sqlite import SqliteStore
+    store = SqliteStore(str(tmp_path / "p.db"))
+    pol = Policy(permissions=frozenset({"read", "write"}), allowed_tools=None, allowed_agents=frozenset({"x"}),
+                 denied_tools=frozenset({"d"}), allow_approval_required=True)
+    await store.save_execution(ExecutionRecord("e", "w", "failed", 1.0, policy=pol.to_dict()))
+    assert Policy.from_dict((await store.get_execution("e")).policy) == pol
+
+
+async def test_unauthenticated_tenant_claim_logs_a_warning_once(caplog):
+    h, _ = make()
+    with caplog.at_level("WARNING", logger="draco.harness"):
+        await h.run("w", 1, tenant_id="acme")
+        await h.run("w", 1, tenant_id="acme")
+    assert [r.message for r in caplog.records].count("tenant_id supplied without an Identity: it is an unauthenticated claim; pass identity= and set require_identity for multi-tenant use") == 1
+
+
+async def test_per_tenant_concurrency_cap_rejects_excess_without_starving_other_tenants():
+    import asyncio
+    h = Harness(DracoSettings(max_concurrency_per_tenant=1))
+    gate = asyncio.Event()
+
+    async def hold(ctx, _):
+        await gate.wait()
+        return "ok"
+    h.register("hold", hold)
+    first = asyncio.create_task(h.run("hold", identity=ALICE))
+    await asyncio.sleep(0.01)
+    second = await h.run("hold", identity=ALICE)  # same tenant: rejected immediately
+    assert second.status == Status.budget_exhausted and second.error.details["resource"] == "tenant_concurrency"
+    other = asyncio.create_task(h.run("hold", identity=BOB))  # different tenant is unaffected
+    await asyncio.sleep(0.01)
+    gate.set()
+    assert (await first).ok and (await other).ok
+    assert h._tenant_inflight == {}  # slots released
+    assert (await h.run("hold", identity=ALICE)).ok
+
+
+async def test_failed_runs_and_mutating_tools_are_never_repeated_automatically():
+    from draco.tools import ErrorCode, NoArgs, ToolFailure, ToolRegistry, ToolRuntime, native_tool
+    reg, effects = ToolRegistry(), []
+
+    @native_tool(reg, name="charge", description="x", input_model=NoArgs, mutates_state=True, permissions={"write"})
+    async def charge(args, ctx):
+        effects.append(1)
+        raise ToolFailure(ErrorCode.upstream_error, "503 after the charge may have gone through", retryable=True)
+    rt = ToolRuntime(reg, max_attempts=5, retry_delay=0.001)
+    h = Harness(DracoSettings())
+
+    async def agent(ctx, _):
+        r = await rt.call(ctx, "charge", {})
+        if not r.ok:
+            raise RuntimeError("tool failed")
+    h.register("agent", agent)
+    r = await h.run("agent", policy=Policy(allowed_tools=frozenset({"charge"}), permissions=frozenset({"read", "write"})))
+    assert r.status == Status.failed and effects == [1]  # neither the tool runtime nor the harness retried

@@ -20,6 +20,7 @@ class DracoSettings(BaseModel):
     max_retries: int | None = Field(default=None, gt=0)
     max_tokens: int | None = Field(default=None, gt=0)
     max_concurrency: int = Field(default=8, gt=0)
+    max_concurrency_per_tenant: int | None = Field(default=None, gt=0)  # root executions in flight per tenant; excess is rejected
     state_path: str | None = None  # SQLite file; None = in-memory stores
     trace_path: str | None = None  # JSONL file; None = in-memory trace only
     redact_keys: tuple[str, ...] = ("key", "token", "password", "secret", "authorization")

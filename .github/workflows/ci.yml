@@ -32,7 +32,7 @@ jobs:
       - name: Install draco with dev tools only
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e ".[dev,providers]"
       - name: Reject tracked runtime data
         run: |
           if git ls-files | grep -E '(^|/)(app/storage|uploads|artifacts|eval_results)(/|$)|(^|/)(\.env|.*\.db)$'; then
@@ -45,6 +45,11 @@ jobs:
           mypy src/draco
       - name: Framework tests that need no ML stack
         run: python -m pytest tests/draco/unit tests/draco/reliability -q
+      - name: Built wheel imports without the starter app (non-editable install, run from another directory)
+        run: |
+          python -m pip wheel . --no-deps -w /tmp/wheel
+          python -m venv /tmp/clean && /tmp/clean/bin/pip install /tmp/wheel/draco-*.whl
+          cd /tmp && /tmp/clean/bin/python -I -c "import sys, draco, draco.tools, draco.security, draco.adapters.retrieval; assert not {'app','torch','langgraph'} & set(sys.modules)"
       - name: Dependency audit (framework deps, then the app's pinned requirements)
         run: |
           python -m pip uninstall --yes draco

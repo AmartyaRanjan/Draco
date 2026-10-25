@@ -1,5 +1,7 @@
 # Changelog: PDF detection and Docling conversion stage
 
+> Framework (`src/draco`) changes are tracked in [docs/DRACO_CHANGELOG.md](docs/DRACO_CHANGELOG.md).
+
 Newest entry first. Iterations 4 and 5 touch the ingestion pipeline, the stores, the registry and their tests. Iterations 1 and 2 were limited to `app/ingestion/pdf_detector.py`,
 `app/ingestion/convert.py` and `tests/`; Iteration 3 also touches the registry, upload route and worker.
 
