@@ -12,7 +12,14 @@ from typing import Any
 from draco.core.budget import BudgetLimits, BudgetTracker
 from draco.core.config import DracoSettings
 from draco.core.context import RESERVED_METADATA, CancellationToken, ExecutionContext, new_id, use_context
-from draco.core.errors import ContractError, DracoError, PersistenceError, PolicyViolation, RoutingError
+from draco.core.errors import (
+    BudgetExhausted,
+    ContractError,
+    DracoError,
+    PersistenceError,
+    PolicyViolation,
+    RoutingError,
+)
 from draco.core.events import Event, EventBus
 from draco.core.identity import Identity
 from draco.core.policy import Policy
@@ -64,6 +71,8 @@ class Harness:
         self._inflight: dict[str, ExecutionContext] = {}
         self._children: dict[str, list[str]] = {}
         self._sem = asyncio.Semaphore(self.settings.max_concurrency)
+        self._warned_unauthenticated = False
+        self._tenant_inflight: dict[str, int] = {}
         self._input_guards: list[Guardrail] = []
         self._output_guards: list[Guardrail] = []
 
@@ -128,6 +137,10 @@ class Harness:
             if (user_id and user_id != identity.subject) or (tenant_id and tenant_id != identity.tenant_id):
                 raise PolicyViolation("user_id/tenant_id contradict the authenticated identity")
             user_id, tenant_id = identity.subject, identity.tenant_id
+        elif tenant_id and not self._warned_unauthenticated:
+            self._warned_unauthenticated = True
+            logger.warning("tenant_id supplied without an Identity: it is an unauthenticated claim; pass identity= "
+                           "and set require_identity for multi-tenant use")
         return ExecutionContext(
             identity=identity,
             session_id=session_id, agent_id=agent_id or target, user_id=user_id, tenant_id=tenant_id,
@@ -175,12 +188,16 @@ class Harness:
         timeout = timeout_s if timeout_s is not None else self.settings.default_timeout_s
         if rec.tenant_id is not None and (identity is None or identity.tenant_id != rec.tenant_id):
             raise ContractError(f"unknown execution '{execution_id}'")  # same answer as a missing id: no cross-tenant probing
+        stored = Policy.from_dict(rec.policy) if rec.policy is not None else None
+        if stored is not None and policy is not None and not policy.narrows(stored):
+            raise PolicyViolation("resume cannot widen the policy the execution started under")
+        effective = policy or stored or Policy()
         ctx = ExecutionContext(
             execution_id=rec.execution_id, parent_execution_id=rec.parent_execution_id, session_id=rec.session_id,
             identity=identity, user_id=identity.subject if identity else rec.user_id, tenant_id=rec.tenant_id,
             agent_id=rec.agent_id, correlation_id=rec.correlation_id or new_id(),
             deadline=time.monotonic() + timeout if timeout else None,
-            budget=BudgetTracker(limits or self.settings.limits()), policy=policy or Policy(),
+            budget=BudgetTracker(limits or self.settings.limits()), policy=effective,
             services=self.services, metadata={"resumed": True, "previous_status": rec.status})
         await authorize(ctx, "execution.resume", Resource("execution", rec.execution_id, rec.tenant_id))
         return await self._execute(ctx, rec.target, rec.input if input is None else input,
@@ -208,8 +225,9 @@ class Harness:
         rec = ExecutionRecord(ctx.execution_id, target, "running", started, ctx.parent_execution_id, ctx.session_id,
                               ctx.agent_id, ctx.correlation_id, idempotency_key=idempotency_key, attempts=attempts,
                               input=_jsonable(input), tenant_id=ctx.tenant_id, user_id=ctx.user_id,
-                              roles=sorted(ctx.identity.roles) if ctx.identity else [])
+                              roles=sorted(ctx.identity.roles) if ctx.identity else [], policy=ctx.policy.to_dict())
         sem_held = False
+        tenant_held: str | None = None
         try:
             # 1. resolve + authorize
             spec = self.get(target)
@@ -231,6 +249,12 @@ class Harness:
                     prev.idempotency_key = None  # superseded by this attempt
                     await self.store.save_execution(prev)
                     rec.attempts = prev.attempts + 1
+            cap = self.settings.max_concurrency_per_tenant
+            if is_root and cap and ctx.tenant_id is not None:
+                if self._tenant_inflight.get(ctx.tenant_id, 0) >= cap:  # reject, don't queue: one tenant cannot fill the queue
+                    raise BudgetExhausted("tenant_concurrency", cap)
+                self._tenant_inflight[ctx.tenant_id] = self._tenant_inflight.get(ctx.tenant_id, 0) + 1
+                tenant_held = ctx.tenant_id
             if is_root:
                 await self._sem.acquire()
                 sem_held = True
@@ -267,6 +291,12 @@ class Harness:
         finally:
             if sem_held:
                 self._sem.release()
+            if tenant_held is not None:
+                left = self._tenant_inflight[tenant_held] - 1
+                if left:
+                    self._tenant_inflight[tenant_held] = left
+                else:
+                    del self._tenant_inflight[tenant_held]
         await self._finalize(ctx, res, rec, usage0, started, target)
         return res
 

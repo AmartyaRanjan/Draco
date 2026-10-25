@@ -64,7 +64,7 @@ Core subsystems:
 
 ## Draco as a framework (`src/draco`)
 
-Draco's native core needs only `pydantic`; retrieval, ingestion, LangGraph, MCP and OpenTelemetry are optional adapters. `app/` is a starter application reached only through `draco.adapters.app_*`.
+Draco's native core needs only `pydantic`; retrieval, ingestion, LangGraph, MCP and OpenTelemetry are optional adapters. `app/` is a starter application reached only through `draco.adapters.app_*`. What changed and what is still open: [docs/DRACO_CHANGELOG.md](docs/DRACO_CHANGELOG.md).
 
 ### The contract
 
@@ -113,6 +113,7 @@ Dependency direction is enforced by `tests/draco/unit/test_import_boundaries.py`
 ```
 pip install -e .              # native framework
 pip install -e ".[agents]"    # LangGraph adapter
+pip install -e ".[providers]" # OpenAI-compatible / Anthropic model providers (httpx)
 pip install -e ".[mcp]"       # MCP tools
 pip install -e ".[otel]"      # OpenTelemetry exporter
 pip install -e ".[dev]"       # pytest, ruff, mypy

@@ -3,6 +3,7 @@
 ```
 pip install -e .            # native framework: pydantic only
 pip install -e ".[dev]"     # + pytest, ruff, mypy, pip-audit
+pip install -e ".[providers]" # OpenAI-compatible and Anthropic providers
 pip install -e ".[mcp]"     # optional MCP tools      (.[otel] OpenTelemetry, .[agents] LangGraph, .[app] httpx for the starter app)
 ```
 The starter RAG engine in `app/` keeps its own dependencies in `requirements.txt`; only the `draco.adapters.app_*` modules need them. Nothing outside `draco.adapters` imports `app` (enforced by `tests/draco/unit/test_import_boundaries.py`).
@@ -66,10 +67,11 @@ Starter-app capabilities: `draco.adapters.app_capabilities.register_app_capabili
 - Authentication: build `Identity` from a verified credential (implement `Authenticator`); Draco ships none. Without `identity=`, `user_id`/`tenant_id` are plain strings from a trusted in-process caller, not proof of identity.
 - Document ownership: pass `document_resource=lambda doc_id: Resource("document", doc_id, tenant_id=...)` to the retrieval/ingestion adapters. With an identity and no resolver, document access is denied, not allowed.
 - Default `RoleAuthorizer()` without grants or `require_identity` allows identity-less, tenant-less operations (single-tenant use). Turn on `require_identity` for multi-tenant deployments.
-- Known gaps: no per-tenant rate limits or quotas, no encrypted-at-rest state, `Policy` is not persisted (a resumed execution gets the policy passed to `resume()`), and prompt-injection detection is a heuristic.
+- `Policy` is persisted with the execution; `resume()` restores it and refuses a more permissive one. `DracoSettings.max_concurrency_per_tenant` rejects excess concurrent root executions of one tenant (`budget_exhausted`, resource `tenant_concurrency`).
+- Known gaps: no time-window rate limits, no encrypted-at-rest state, no authentication provider, and prompt-injection detection is a heuristic.
 
 ## Adapters (`draco.adapters`)
-Provider-neutral and dependency-free: `model_provider` (`ModelProvider` protocol, `ModelRequest/Response`, `generate(ctx, provider, req)` = budgeted, evented model call with token accounting), `retrieval` (`Retriever` protocol, `Evidence`, `retrieval_workload(retriever, document_resource=)`), `ingestion` (`ingest_workload(callable, resource_for=)`). Optional framework: `langgraph.graph_workload(graph, recursion_limit=)` (`pip install draco[agents]`): thread id = execution id, `__interrupt__` becomes `Waiting`, resume with `h.resume(id, input=Command(resume=...))`, `GraphRecursionError` becomes `BudgetExhausted("graph_steps")`; model calls inside a graph are budgeted only if nodes use `call_model`. Starter app: `app_retrieval` (`retrieval_workload`, `rag_workload`, both accept `document_resource`), `app_agent`, `app_ingestion`, `app_capabilities`, `app_trace`, `conversation`, `errors`. `app` exceptions map to typed errors (422 `ContractError`, 504 `ExecutionTimeout`, 429/5xx retryable `ProviderError`). The retrieval trace's `request_id` equals the execution id.
+Provider-neutral and dependency-free: `model_provider` (`ModelProvider` protocol, `ModelRequest/Response`, `generate(ctx, provider, req)` = budgeted, evented model call with token accounting), `retrieval` (`Retriever` protocol, `Evidence`, `retrieval_workload(retriever, document_resource=)`), `ingestion` (`ingest_workload(callable, resource_for=)`). Model providers (`pip install draco[providers]`): `providers.openai_compat.OpenAICompatProvider(base_url, api_key=Secret(...), model=)` and `providers.anthropic.AnthropicProvider(Secret(...), model=)`; pass them to `generate(ctx, provider, ModelRequest(messages))`. Errors are `ProviderError` (429/5xx/timeouts retryable, other 4xx not) and never contain response bodies. Optional framework: `langgraph.graph_workload(graph, recursion_limit=)` (`pip install draco[agents]`): thread id = execution id, `__interrupt__` becomes `Waiting`, resume with `h.resume(id, input=Command(resume=...))`, `GraphRecursionError` becomes `BudgetExhausted("graph_steps")`; model calls inside a graph are budgeted only if nodes use `call_model`. Starter app: `app_retrieval` (`retrieval_workload`, `rag_workload`, both accept `document_resource`), `app_agent`, `app_ingestion`, `app_capabilities`, `app_trace`, `conversation`, `errors`. `app` exceptions map to typed errors (422 `ContractError`, 504 `ExecutionTimeout`, 429/5xx retryable `ProviderError`). The retrieval trace's `request_id` equals the execution id.
 
 Sessions: `draco.adapters.conversation.sqlite_conversation_store(path)` returns the app's `SqliteConversationStore` (ownership enforced per user). Conversation memory is separate from execution history/checkpoints (`draco.state`).
 
@@ -83,5 +85,6 @@ The `Tracer` records every bus event, redacted (`api_key`/`token`/`password`/`se
 - `Harness.cancel()` of a tenant-scoped execution needs `identity=`.
 - `app_agent` no longer substitutes `"anonymous"` when `user_id` is missing; it fails with `PolicyViolation`.
 - New audit events (`security.allowed`/`security.denied`) appear in traces.
+- The wheel no longer includes `app`; `resume()` now restores the persisted `Policy`. Full list: [DRACO_CHANGELOG.md](DRACO_CHANGELOG.md).
 
 `app/` is untouched. The old `unittest discover -s tests -t .` command still runs the original 343 tests (the new `tests/draco` package is pytest-based and skips itself under unittest). New: `pip install -e .`, run new tests with `pytest tests/draco`.

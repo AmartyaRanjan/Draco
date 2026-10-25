@@ -15,15 +15,16 @@ dependencies = ["pydantic>=2.6"]
 
 [project.optional-dependencies]
 agents = ["langgraph>=1.0", "langchain-core"]   # draco.adapters.langgraph
+providers = ["httpx>=0.27"]                      # draco.adapters.providers (OpenAI-compatible, Anthropic)
 app = ["httpx>=0.27"]                            # adapters for the bundled starter app (plus requirements.txt)
 mcp = ["mcp>=1.0"]
 otel = ["opentelemetry-api", "opentelemetry-sdk"]
 dev = ["pytest>=8", "ruff", "mypy", "pip-audit"]
 
 [tool.setuptools.packages.find]
-# `app` is the existing RAG engine and ships alongside `draco` for now (see docs/architecture).
-where = ["src", "."]
-include = ["draco*", "app*"]
+# Only the framework is packaged. `app` (the starter RAG service) is deployed from source (see the Dockerfile).
+where = ["src"]
+include = ["draco*"]
 
 [tool.setuptools.exclude-package-data]
 app = ["storage/**"]

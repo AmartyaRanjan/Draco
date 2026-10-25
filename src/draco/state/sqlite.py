@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS executions (
   execution_id TEXT PRIMARY KEY, parent_execution_id TEXT, session_id TEXT, agent_id TEXT,
   correlation_id TEXT, target TEXT NOT NULL, status TEXT NOT NULL, started_at REAL NOT NULL,
   finished_at REAL, idempotency_key TEXT, output_json TEXT, error_json TEXT, usage_json TEXT,
-  attempts INTEGER NOT NULL DEFAULT 1, input_json TEXT, tenant_id TEXT, user_id TEXT, roles_json TEXT);
+  attempts INTEGER NOT NULL DEFAULT 1, input_json TEXT, tenant_id TEXT, user_id TEXT, roles_json TEXT, policy_json TEXT);
 CREATE UNIQUE INDEX IF NOT EXISTS ux_exec_key ON executions(idempotency_key) WHERE idempotency_key IS NOT NULL;
 CREATE INDEX IF NOT EXISTS ix_exec_parent ON executions(parent_execution_id);
 CREATE TABLE IF NOT EXISTS events (
@@ -44,7 +44,7 @@ class SqliteStore:
                 self._db.execute("PRAGMA journal_mode=WAL")
             self._db.executescript(_SCHEMA)
             have = {r["name"] for r in self._db.execute("PRAGMA table_info(executions)")}
-            for col in ("tenant_id TEXT", "user_id TEXT", "roles_json TEXT"):  # databases created before identity existed
+            for col in ("tenant_id TEXT", "user_id TEXT", "roles_json TEXT", "policy_json TEXT"):  # databases created before identity existed
                 if col.split()[0] not in have:
                     self._db.execute(f"ALTER TABLE executions ADD COLUMN {col}")
             self._db.commit()
@@ -77,14 +77,15 @@ class SqliteStore:
             usage=json.loads(r["usage_json"]) if r["usage_json"] else {}, attempts=r["attempts"],
             input=json.loads(r["input_json"]) if r["input_json"] else None,
             tenant_id=r["tenant_id"], user_id=r["user_id"],
-            roles=json.loads(r["roles_json"]) if r["roles_json"] else [])
+            roles=json.loads(r["roles_json"]) if r["roles_json"] else [],
+            policy=json.loads(r["policy_json"]) if r["policy_json"] else None)
 
     async def save_execution(self, rec: ExecutionRecord) -> None:
         def f(db: sqlite3.Connection) -> None:
             db.execute(
                 "INSERT INTO executions(execution_id,parent_execution_id,session_id,agent_id,correlation_id,target,status,"
-                "started_at,finished_at,idempotency_key,output_json,error_json,usage_json,attempts,input_json,tenant_id,user_id,roles_json)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                "started_at,finished_at,idempotency_key,output_json,error_json,usage_json,attempts,input_json,tenant_id,user_id,roles_json,policy_json)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
                 "ON CONFLICT(execution_id) DO UPDATE SET status=excluded.status, finished_at=excluded.finished_at,"
                 " idempotency_key=excluded.idempotency_key, output_json=excluded.output_json, error_json=excluded.error_json, usage_json=excluded.usage_json,"
                 " attempts=excluded.attempts",
@@ -92,7 +93,8 @@ class SqliteStore:
                  rec.target, rec.status, rec.started_at, rec.finished_at, rec.idempotency_key,
                  None if rec.output is None else dumps(rec.output),
                  None if rec.error is None else dumps(rec.error), dumps(rec.usage), rec.attempts,
-                 None if rec.input is None else dumps(rec.input), rec.tenant_id, rec.user_id, dumps(rec.roles)))
+                 None if rec.input is None else dumps(rec.input), rec.tenant_id, rec.user_id, dumps(rec.roles),
+                 None if rec.policy is None else dumps(rec.policy)))
         await self._run(f)
 
     async def get_execution(self, execution_id: str) -> ExecutionRecord | None:

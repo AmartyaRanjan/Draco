@@ -27,6 +27,7 @@ class ExecutionRecord:
     tenant_id: str | None = None  # owner; resume() and lookups are checked against the caller's tenant
     user_id: str | None = None
     roles: list[str] = field(default_factory=list)
+    policy: dict[str, Any] | None = None  # the Policy the execution ran under; resume() cannot widen it
 
 
 @dataclass
