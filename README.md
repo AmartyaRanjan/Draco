@@ -198,7 +198,7 @@ Dataset, metrics, baselines and reproducibility instructions: [evals.md](evals.m
 - Retrieval is sensitive to phrasing; contextual chunk headers and query rewriting need re-indexing.
 - The 4B model skips tools for some arithmetic; agent graph state is in-memory (a restart loses an in-flight run).
 - Single-host data stores, no replication or automated backup; Docker image and CI workflow have not been built/run end-to-end.
-- Previously committed runtime files remain in published Git history; treat them as exposed and rotate credentials.
+- Previously committed runtime files remain in published Git history; treat them as exposed and rotate credentials. Purge runbook: [docs/HISTORY_PURGE.md](docs/HISTORY_PURGE.md) — check exposure with `scripts/check_history_exposure.sh`.
 
 ## Roadmap
 

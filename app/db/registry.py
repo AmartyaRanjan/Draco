@@ -1,11 +1,15 @@
-import sqlite3
 import os
+import sqlite3
+import time
 from contextlib import closing
 from pathlib import Path
-import time
 
 DB_PATH = Path(__file__).resolve().parents[1] / "storage" / "documents.db"
 MAX_RETRIEVAL_DOCUMENTS = int(os.getenv("MAX_RETRIEVAL_DOCUMENTS", "1000"))
+# Queue attempts before a document fails terminally. Each requeue creates a new
+# job id, so `attempts` counts real attempts. Without this cap a hard-killed
+# worker (e.g. OOM on a hostile PDF) is requeued by reconciliation forever.
+MAX_INGESTION_ATTEMPTS = max(1, int(os.getenv("MAX_INGESTION_ATTEMPTS", "5")))
 
 
 class DocumentScopeTooLarge(ValueError):
@@ -383,7 +387,32 @@ def release_ingestion_outbox(document_id, error):
 
 
 def requeue_missing_ingestion(document_id):
+    """Reset a lost queue job for another attempt, or fail the document terminally
+    once its attempt budget is spent. Returns True if it was requeued.
+
+    Without the budget a job that always kills the worker (OOM on a hostile PDF)
+    or always times out loops the worker forever: reconciliation resets the
+    outbox, a new job id is claimed, and the cycle repeats.
+    """
     with closing(get_connection()) as conn, conn:
+        row = conn.execute(
+            "SELECT attempts FROM ingestion_outbox WHERE document_id = ?",
+            (document_id,),
+        ).fetchone()
+        if row is not None and row["attempts"] >= MAX_INGESTION_ATTEMPTS:
+            error = f"ingestion abandoned after {MAX_INGESTION_ATTEMPTS} queue attempts"
+            conn.execute(
+                "UPDATE documents SET status = 'failed', error = ? "
+                "WHERE document_id = ? AND status IN ('queued', 'processing')",
+                (error, document_id),
+            )
+            conn.execute(
+                "UPDATE ingestion_outbox SET state = 'failed', lease_until = NULL, "
+                "last_error = ?, updated_at = ? WHERE document_id = ? "
+                "AND state IN ('queued', 'running', 'publishing')",
+                (error, time.time(), document_id),
+            )
+            return False
         conn.execute(
             "UPDATE documents SET status = 'uploaded', job_id = NULL "
             "WHERE document_id = ? AND status IN ('queued', 'processing')",
@@ -395,6 +424,7 @@ def requeue_missing_ingestion(document_id):
             "AND state IN ('queued', 'running', 'publishing')",
             (time.time(), document_id),
         )
+        return True
 
 
 def mark_ingestion_enqueued(document_id, job_id):

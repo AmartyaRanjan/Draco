@@ -172,7 +172,7 @@ Reading: **retrieval is GPU-serial at about 2.9 req/s** (the BGE-M3 + ColBERT lo
 ## 5. Operations runbook
 
 **Start.** vLLM: `cd deploy/vllm && docker compose up -d`; API: `uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-access-log` (the middleware writes the access log); worker: `rqworker ingestion`
-(needs Docling, which is only installed where ingestion runs). Gate traffic on `GET /health/ready`.
+(needs Docling, which is only installed where ingestion runs), or the resource-limited worker container: `cd deploy/worker && REDIS_URL=redis://localhost:6379/0 docker compose up -d`. Gate traffic on `GET /health/ready`.
 
 **Suggested alerts** (all metrics exist):
 
@@ -203,8 +203,8 @@ Ordered by how likely they are to matter.
 4. **The two large PDFs in `documents/` are not indexed** (a 548-page and a 673-page book are `queued`; Docling is not installed in this environment). All measurements are on the 7 indexed PDFs (280 chunks). Production corpora will be larger and noisier than anything measured here.
 5. **TLS, authentication of `/metrics`, WAF and DDoS protection are the reverse proxy's job** and are not configured in this repository. Do not expose the app port directly.
 6. **Single-host data stores.** SQLite files, one Qdrant, one OpenSearch, one Redis, one GPU shared with other tenants on this machine (measured load average 15 to 185 during testing; see 4). No replication, failover, or automated backup.
-7. **Uploaded PDFs are parsed by Docling in the worker process.** Preflight limits now reject oversized files, excessive page counts, and image-heavy pages, and the default RQ timeout is 900 s. A dedicated worker container with OS-level memory/CPU limits is still required for hostile PDFs.
-8. **Docker image and CI workflow are untested.** Neither was built or run; the Dockerfile pins Python 3.14 and omits Docling and CUDA, which the worker image needs.
+7. **Uploaded PDFs are parsed by Docling in the worker process.** Preflight limits reject oversized files, excessive page counts, and image-heavy pages, and a policy rejection is no longer converted anyway with OCR (the old fallback defeated the limits). Requeues are capped by `MAX_INGESTION_ATTEMPTS` (default 5); past the budget the document fails terminally instead of looping a poison job. `deploy/worker/docker-compose.yml` provides the isolated worker container with memory/CPU/PID ceilings — RQ's signal-based timeout cannot interrupt native pdfium/OCR code, so the container memory limit is the real backstop. The worker image is still not built or run end-to-end.
+8. **Docker image and CI workflow are untested.** Neither was built or run; the Dockerfile pins Python 3.14 and the worker container is not exercised in CI, and CUDA support for the worker's GPU embeddings is not pinned.
 9. **Rate limits are starting values**, chosen from measured service times, not from real traffic.
 10. **Read-policy limiter fallback is per process** when Redis is down. High-risk `authfail`, `upload`, and `heavy` policies now fail closed until the shared limiter returns; read traffic remains bounded per process for availability.
 11. **Auth is a static API-key list.** No expiry, no scopes, no audit log beyond the access log. Fine for service-to-service clients, thin for people.

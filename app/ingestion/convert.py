@@ -13,7 +13,12 @@ from docling.document_converter import (
 )
 from docling_core.types.doc import DoclingDocument
 
-from app.ingestion.pdf_detector import PdfDetectionError, PdfInspection, inspect_pdf
+from app.ingestion.pdf_detector import (
+    PdfDetectionError,
+    PdfInspection,
+    PdfPolicyError,
+    inspect_pdf,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -184,7 +189,8 @@ def convert_pdf(pdf_path: str | Path, routing: str | None = None) -> PdfConversi
     """Convert a PDF with Docling's standard pipeline and report per-page OCR decisions.
 
     Any page that is not clearly digital is converted with OCR. If the PDF cannot
-    be inspected, the whole document is converted with OCR.
+    be inspected, the whole document is converted with OCR. A structural limit
+    rejection (PdfPolicyError) is never converted: it propagates to the caller.
     """
     routing = routing or os.getenv("PDF_ROUTING", DEFAULT_ROUTING)
     if routing not in ROUTING_MODES:
@@ -192,6 +198,10 @@ def convert_pdf(pdf_path: str | Path, routing: str | None = None) -> PdfConversi
 
     try:
         inspection = inspect_pdf(pdf_path)
+    except PdfPolicyError:
+        # The detector refused this file for exceeding a structural limit.
+        # Converting it with OCR would defeat the limit, so re-raise.
+        raise
     except PdfDetectionError as exc:
         logger.warning("PDF detection failed (%s); falling back to OCR", exc)
         result = _convert(pdf_path, True)

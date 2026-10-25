@@ -5,10 +5,9 @@ from pathlib import Path
 from threading import Event, Thread
 from unittest.mock import patch
 
-from rq.exceptions import DuplicateJobError
-
 from app.db import registry
 from app.ingestion.dispatch import reconcile_ingestion_outbox, submit_document
+from rq.exceptions import DuplicateJobError
 
 
 class FakeJob:
@@ -129,6 +128,42 @@ class DurableDispatchTests(unittest.TestCase):
         self.assertEqual(submit_document(document_id, self.queue), job_id)
         self.assertEqual(registry.get_ingestion_outbox(document_id)["state"], "completed")
         self.assertEqual(registry.get_document(document_id)["status"], "completed")
+        self.assertEqual(self.queue.enqueue_calls, 1)
+
+    def test_lost_job_within_attempt_budget_is_requeued(self):
+        document_id = self.register()
+        job_id = submit_document(document_id, self.queue)
+        with closing(registry.get_connection()) as conn, conn:
+            conn.execute(
+                "UPDATE ingestion_outbox SET attempts = ? WHERE document_id = ?",
+                (registry.MAX_INGESTION_ATTEMPTS - 1, document_id),
+            )
+        self.queue.jobs[job_id].status = "failed"  # worker died on the job
+
+        self.assertIsNotNone(submit_document(document_id, self.queue))
+        self.assertEqual(self.queue.enqueue_calls, 2)
+        self.assertEqual(registry.get_ingestion_outbox(document_id)["state"], "queued")
+        self.assertEqual(registry.get_document(document_id)["status"], "queued")
+
+    def test_lost_job_beyond_attempt_budget_fails_terminally(self):
+        # A job that always kills the worker (OOM on a hostile PDF) must not be
+        # requeued forever: after the budget the document fails terminally.
+        document_id = self.register()
+        job_id = submit_document(document_id, self.queue)
+        with closing(registry.get_connection()) as conn, conn:
+            conn.execute(
+                "UPDATE ingestion_outbox SET attempts = ? WHERE document_id = ?",
+                (registry.MAX_INGESTION_ATTEMPTS, document_id),
+            )
+        self.queue.jobs[job_id].status = "failed"
+
+        self.assertIsNone(submit_document(document_id, self.queue))
+        self.assertEqual(self.queue.enqueue_calls, 1)
+        self.assertEqual(registry.get_ingestion_outbox(document_id)["state"], "failed")
+        self.assertEqual(registry.get_document(document_id)["status"], "failed")
+        self.assertIn("attempts", registry.get_document(document_id)["error"])
+        # Terminal: reconciliation leaves it alone instead of looping.
+        self.assertEqual(reconcile_ingestion_outbox(self.queue), 0)
         self.assertEqual(self.queue.enqueue_calls, 1)
 
 
