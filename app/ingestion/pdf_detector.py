@@ -19,6 +19,15 @@ class PdfDetectionError(Exception):
     """The PDF could not be inspected (empty, malformed, or encrypted)."""
 
 
+class PdfPolicyError(PdfDetectionError):
+    """The PDF exceeds a configured structural limit (bytes, pages, images per page).
+
+    Distinct from PdfDetectionError so conversion can tell "uninspectable"
+    (fall back to whole-document OCR) from "rejected by policy" (refuse the
+    file; converting it anyway would defeat the limit).
+    """
+
+
 @dataclass(frozen=True)
 class DetectorConfig:
     # Non-whitespace characters at or above which a page has a usable text layer.
@@ -126,7 +135,7 @@ def _classify_page(index: int, page, config: DetectorConfig) -> PageResult:
         return PageResult(index, "ambiguous", 0, 0, 0, f"inspection failed: {type(exc).__name__}")
 
     if config.max_images_per_page is not None and images > config.max_images_per_page:
-        raise PdfDetectionError(
+        raise PdfPolicyError(
             f"page {index + 1} contains too many images ({images}); "
             f"limit is {config.max_images_per_page}"
         )
@@ -156,14 +165,15 @@ def inspect_pdf(
     whole page is. No rendering or OCR is performed.
 
     Raises PdfDetectionError if the PDF is empty, malformed, or encrypted with
-    a non-empty password.
+    a non-empty password, and PdfPolicyError if it exceeds a structural limit
+    (MAX_PDF_BYTES, max_document_pages, max_images_per_page).
     """
     config = config or DetectorConfig()
 
     try:
         file_size = Path(pdf_path).stat().st_size
         if file_size > MAX_PDF_BYTES:
-            raise PdfDetectionError(
+            raise PdfPolicyError(
                 f"PDF is {file_size} bytes; limit is {MAX_PDF_BYTES} bytes"
             )
         with open(pdf_path, "rb") as f:
@@ -175,7 +185,7 @@ def inspect_pdf(
                 raise PdfDetectionError("PDF contains no pages")
             if (config.max_document_pages is not None and
                     page_count > config.max_document_pages):
-                raise PdfDetectionError(
+                raise PdfPolicyError(
                     f"PDF has {page_count} pages; limit is {config.max_document_pages}"
                 )
             indices = _sample_indices(page_count, config.max_pages)

@@ -1,0 +1,41 @@
+# Ingestion worker container. This process parses untrusted uploads (Docling
+# layout analysis + OCR), so it runs isolated with hard resource limits: a
+# hostile document that wedges or OOMs the converter takes down this container
+# only. RQ's signal-based job timeout cannot interrupt native pdfium/OCR code;
+# the container memory ceiling is what actually stops it (the kernel OOM-killer
+# ends the worker, RQ marks the job failed, and the outbox attempt cap stops
+# the retry loop — see MAX_INGESTION_ATTEMPTS in app/db/registry.py).
+#
+# Reuses the API image (requirements.txt already contains Docling and torch).
+# Mounts the same storage volume the API uses: the SQLite registry, the outbox,
+# and app/storage/uploads must be shared between the two containers
+# (single-host trust domain; see production.md §6).
+#
+# Not built or run in the session that wrote it (no Docker daemon), like the
+# API Dockerfile. Verify before production use.
+services:
+  ingestion-worker:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    container_name: rag-ingestion-worker
+    command: rqworker ingestion --url ${REDIS_URL:?set REDIS_URL}
+    environment:
+      REDIS_URL: ${REDIS_URL:?set REDIS_URL}
+      # Backend URLs default to localhost; host networking keeps those defaults
+      # working on a single-host Linux deployment. Drop this and join a service
+      # network if the backends are containers too.
+      OPENSEARCH_URL: ${OPENSEARCH_URL:-http://localhost:9200}
+      QDRANT_URL: ${QDRANT_URL:-http://localhost:6333}
+    network_mode: host
+    volumes:
+      - draco_storage:/srv/app/storage
+    # Hard ceilings for untrusted-document processing.
+    mem_limit: ${WORKER_MEM_LIMIT:-4g}
+    memswap_limit: ${WORKER_MEM_LIMIT:-4g}   # no hidden swap slack
+    cpus: ${WORKER_CPUS:-2.0}
+    pids_limit: 128
+    restart: unless-stopped
+
+volumes:
+  draco_storage:
