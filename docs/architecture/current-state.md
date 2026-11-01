@@ -21,3 +21,17 @@ Cross-cutting: no common exception base (`RetrievalError`, `InferenceError`, `To
 
 ## Unverified / not exercisable here
 Live vLLM, Qdrant, OpenSearch, Redis, the Docker image and GitHub Actions were not available; everything touching them is tested only through the repo's own fakes.
+
+## Durable LangGraph execution update (2026-11-01)
+
+The agent runner now persists LangGraph checkpoints to `AGENT_CHECKPOINT_PATH` (default
+`app/storage/agent-checkpoints.db`) and execution ownership, request, status and response data to
+`AGENT_STORE_PATH` (default `app/storage/agent.db`). A waiting execution can be inspected with
+`GET /agent/executions/{id}` and resumed with `POST /agent/executions/{id}/resume`. Resume decisions
+are validated before graph invocation; approved sources are recorded before the gated ingestion
+capability runs, and rejection records the decision without ingestion. Checkpoint rows, writes and
+unreferenced channel blobs are pruned on checkpointer operations after 30 days; execution rows are
+marked expired on access and retained. Lost status writes and stale resume claims can be reconciled
+from an approval interrupt. The HTTP API's current tenant scope is the authenticated API-key user;
+this is not a general multi-tenant identity provider. See `docs/api-guide.md` for the framework
+adapter and application API contracts.

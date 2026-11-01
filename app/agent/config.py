@@ -1,4 +1,5 @@
 """Agent-layer settings. Every value comes from the environment; secrets are never defaulted."""
+
 import os
 from dataclasses import dataclass
 from functools import lru_cache
@@ -7,9 +8,16 @@ from pathlib import Path
 _STORAGE = Path(__file__).resolve().parents[1] / "storage"
 
 
-def _i(n, d): return int(os.getenv(n, d))
-def _f(n, d): return float(os.getenv(n, d))
-def _b(n, d): return os.getenv(n, d).lower() == "true"
+def _i(n, d):
+    return int(os.getenv(n, d))
+
+
+def _f(n, d):
+    return float(os.getenv(n, d))
+
+
+def _b(n, d):
+    return os.getenv(n, d).lower() == "true"
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +60,7 @@ class AgentSettings:
     image_model: str | None
     # file analysis
     analysis_max_bytes: int
+    checkpoint_path: str = ""
 
     def validate(self, *, production: bool = False) -> "AgentSettings":
         if not 0.3 <= self.evidence_compaction_ratio <= 1.0:
@@ -104,4 +113,5 @@ def get_agent_settings() -> AgentSettings:
         image_api_key=os.getenv("IMAGE_API_KEY") or None,
         image_model=os.getenv("IMAGE_MODEL") or None,
         analysis_max_bytes=_i("ANALYSIS_MAX_BYTES", 20 * 1024 * 1024),
+        checkpoint_path=os.getenv("AGENT_CHECKPOINT_PATH") or str(_STORAGE / "agent-checkpoints.db"),
     ).validate()
