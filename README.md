@@ -155,7 +155,7 @@ Every lifecycle step emits an event (`execution.*`, `route.decided`, `handoff`, 
 | Hybrid retrieval and reranking | Implemented (hit@5 0.79–0.97, faithfulness 0.95) | [evals.md](evals.md), [RETRIEVAL_LOG.md](RETRIEVAL_LOG.md) |
 | Tool permissions and execution limits | Implemented, enforced at runtime | `tests/test_registry.py`, `tests/draco/unit/test_tools.py` |
 | Context compaction | Implemented (summarisation + output-cap shrink) | `app/agent/`, [production.md](production.md) §2.10 |
-| Persistent checkpoint recovery | Partial — harness `step()`/`resume()` and ingestion-job recovery work; agent graph checkpoints stay in memory | `tests/draco/reliability/`, `tests/test_agent_store_recovery.py`, `tests/test_ingestion_dispatch.py` |
+| Persistent checkpoint recovery | Implemented — app agent graph and executions persist in SQLite; waiting approvals resume by stable execution id | `tests/test_agent_checkpoint.py`, `tests/test_agent_resume.py`, `tests/test_agent_store_recovery.py`, `tests/draco/reliability/` |
 | Tenant isolation | Partial — document ownership enforced on all retrieval paths; single-tenant trust domain otherwise | `tests/test_document_ownership.py`, [docs/DOCUMENT_OWNERSHIP.md](docs/DOCUMENT_OWNERSHIP.md) |
 | Live external integrations | Implemented with approval gates and SSRF/injection defences; not exercised against live services in CI | [evals.md](evals.md), [production.md](production.md) §6 |
 
@@ -170,7 +170,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 rqworker ingestion
 
 # Draco harness package
-pip install -e ".[dev]"
+pip install -e ".[dev,agents]"
 PYTHONPATH=src:. python -m examples.a_simple        # examples a..f in examples/
 python -m pytest tests/draco -q                      # harness tests
 python -m unittest discover -s tests -t .            # original suite, unchanged
@@ -191,19 +191,19 @@ Dataset, metrics, baselines and reproducibility instructions: [evals.md](evals.m
 - Runbook, configuration reference and alerts: [production.md](production.md)
 - Threat-scope: hardened for a **single-tenant trust domain**; document ownership now scopes retrieval per authenticated principal ([docs/DOCUMENT_OWNERSHIP.md](docs/DOCUMENT_OWNERSHIP.md))
 - Security posture: API-key auth with brute-force lockout, Redis-backed token-bucket rate limits, LLM admission gate, request-size caps, PDF upload validation, default-deny tool policy, untrusted-output flagging, prompt-injection quarantine (a pattern filter, not a guarantee)
-- Backups: Qdrant/OpenSearch snapshots plus the three SQLite files in `app/storage/`
+- Backups: Qdrant/OpenSearch snapshots plus all configured SQLite state files in `app/storage/`, including the agent checkpoint file
 
 ## Known Limitations
 
 - Prompt injection is mitigated, not solved; paraphrases can get past the filter ([evals.md](evals.md)).
 - Retrieval is sensitive to phrasing; contextual chunk headers and query rewriting need re-indexing.
-- The 4B model skips tools for some arithmetic; agent graph state is in-memory (a restart loses an in-flight run).
+- The 4B model skips tools for some arithmetic. SQLite checkpoints are single-node/local state, expire after 30 days and are not encrypted at rest; a multi-replica deployment needs a shared checkpoint backend.
 - Single-host data stores, no replication or automated backup; Docker image and CI workflow have not been built/run end-to-end.
 - Previously committed runtime files remain in published Git history; treat them as exposed and rotate credentials. Purge runbook: [docs/HISTORY_PURGE.md](docs/HISTORY_PURGE.md) — check exposure with `scripts/check_history_exposure.sh`.
 
 ## Roadmap
 
-Planned work, separated from what is implemented: [docs/architecture/roadmap.md](docs/architecture/roadmap.md). Priorities: running CI on GitHub, LangGraph durable checkpoints with real `interrupt()` approvals, real ACL enforcement via `ExecutionContext`, collapsing the two agent loops onto the harness, and live-provider evals.
+Planned work, separated from what is implemented: [docs/architecture/roadmap.md](docs/architecture/roadmap.md). Priorities include real ACL enforcement via `ExecutionContext`, collapsing the two agent loops onto the harness, and live-provider evals.
 
 ## Contributing and License
 

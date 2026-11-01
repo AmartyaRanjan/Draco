@@ -189,7 +189,7 @@ Reading: **retrieval is GPU-serial at about 2.9 req/s** (the BGE-M3 + ColBERT lo
 
 **Tuning a limit:** change `RATE_LIMIT_*`, restart. Buckets in Redis adopt new numbers on the next request; no flush needed.
 
-**Backups.** Qdrant snapshots, OpenSearch snapshots, and the three SQLite files in `app/storage/` (with WAL, copy using `sqlite3 .backup`, not `cp`). Nothing here automates this.
+**Backups.** Qdrant snapshots, OpenSearch snapshots, and all configured SQLite files in `app/storage/`, including the agent graph checkpoint database (with WAL, copy using `sqlite3 .backup`, not `cp`). Nothing here automates this.
 
 ---
 

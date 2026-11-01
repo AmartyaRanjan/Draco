@@ -12,25 +12,38 @@ Semantics:
 - cancellation/deadline: enforced by the harness around the `ainvoke` task (cooperative at awaits).
 - budgets: model calls made *inside* the graph are only counted if the graph's nodes call
   `draco.harness.call_model`; the adapter cannot see them otherwise."""
+
 from __future__ import annotations
 
 from collections.abc import Callable
 from typing import Any
 
+from draco.adapters.langgraph_checkpoint import checkpoint_config
 from draco.core.context import ExecutionContext
 from draco.core.errors import BudgetExhausted
 from draco.core.protocols import Workload
 from draco.core.results import Waiting
 
 
-def graph_workload(graph: Any, *, to_state: Callable[[Any], Any] = lambda x: x,
-                   from_state: Callable[[Any], Any] = lambda s: s, recursion_limit: int = 25) -> Workload:
+def graph_workload(
+    graph: Any,
+    *,
+    to_state: Callable[[Any], Any] = lambda x: x,
+    from_state: Callable[[Any], Any] = lambda s: s,
+    recursion_limit: int = 25,
+) -> Workload:
     """`graph` is a compiled graph with `ainvoke`."""
+
     async def run(ctx: ExecutionContext, inp: Any) -> Any:
         ctx.check()
-        cfg = {"configurable": {"thread_id": ctx.execution_id}, "recursion_limit": recursion_limit,
-               "metadata": {"draco_execution_id": ctx.execution_id, "draco_correlation_id": ctx.correlation_id,
-                            "draco_tenant_id": ctx.tenant_id, "draco_session_id": ctx.session_id}}
+        cfg = checkpoint_config(
+            ctx.execution_id,
+            tenant_id=ctx.tenant_id,
+            user_id=ctx.user_id,
+            session_id=ctx.session_id,
+            correlation_id=ctx.correlation_id,
+            recursion_limit=recursion_limit,
+        )
         try:
             out = await graph.ainvoke(to_state(inp), cfg)
         except Exception as exc:
@@ -40,4 +53,5 @@ def graph_workload(graph: Any, *, to_state: Callable[[Any], Any] = lambda x: x,
         if isinstance(out, dict) and out.get("__interrupt__"):
             return Waiting("graph interrupted", [getattr(i, "value", i) for i in out["__interrupt__"]])
         return from_state(out)
+
     return run
