@@ -51,8 +51,8 @@ Deterministic (no model, network or randomness; nothing to seed): all `tests/dra
 | Execution context propagates across nested work | **Verified** | parent/child ids, correlation, shared budget, downward cancel |
 | State/history persisted with a documented backend | **Verified** | SQLite + in-memory; conversation store reused (`test_conversation_adapter.py`) |
 | Failures, timeout, cancel, budget have defined outcomes | **Verified** | `Status` enum, eval `termination` 9/9 |
-| Recovery/retries avoid blind duplication of side effects | **Partially verified** | step replay, idempotency keys, reconciliation verified; `AgentRunner` runs are not resumable; external exactly-once not claimed |
-| Concurrent executions isolated | **Partially verified** | in-process concurrency tested (contexts, SQLite, root concurrency limit); multi-process not tested |
+| Recovery/retries avoid blind duplication of side effects | **Partially verified** | harness step replay and app AgentRunner approval resume are persisted; ingestion jobs are idempotency-claimed; external exactly-once not claimed |
+| Concurrent executions isolated | **Partially verified** | in-process concurrency and SQLite resume claims are tested; shared multi-host deployments are not supported |
 | Core tests and runnable examples pass | **Verified** | 409 passed; examples run as tests |
 | Packaging, install, docs, CI | **Partially verified** | clean-venv install, lint, types, audit verified; **CI workflow never run on GitHub**; Docker untouched |
 | Optional integrations not mandatory | **Verified** | boundary test + clean venv without langgraph/torch/mcp/otel |
@@ -64,9 +64,18 @@ Deterministic (no model, network or randomness; nothing to seed): all `tests/dra
 - A `running` record from a dead process blocks its idempotency key until `resume()` is called (deliberate).
 - Persisted `input` is JSON via `str()` fallback (lossy for non-JSON objects); every redacted event is stored with no retention policy.
 - `requires_approval` tools are denied with `approval_required`; no approval workflow in Draco.
+- Agent checkpoints and execution records are local SQLite state with a 30-day expiry and no at-rest encryption; framework approval policies remain workload-defined.
 - MCP: single-page `list_tools` only; text content only; verified on one SDK version.
 - Only Python 3.14 was exercised although `requires-python` says >=3.11.
 - The reference study is partly *recalled*, not source-verified (see its header).
 
 ## Remaining work
-See `docs/architecture/roadmap.md` (priority order: run CI, durable LangGraph checkpoints, resolve `app` package name, enforce ACLs, retention/Postgres store, unify agent loops, live evals).
+See `docs/architecture/roadmap.md` (priority order: run CI, resolve `app` package name, enforce ACLs, retention/Postgres store, unify agent loops, live evals).
+
+## Durable LangGraph update (2026-11-01)
+
+The app AgentRunner now stores graph checkpoints and execution ownership/status in separate SQLite
+databases, exposes owner-scoped inspection and resume APIs, and validates decisions before calling
+LangGraph. Tests cover a fresh-process checkpoint resume, repeated invalid decisions, approval,
+rejection, protected ingestion gating, corruption/expiry, ownership, and competing resume claims.
+The framework adapter remains optional and does not import the app or LangGraph on import.

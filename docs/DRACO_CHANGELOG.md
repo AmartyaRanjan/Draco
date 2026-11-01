@@ -15,6 +15,7 @@ Newest first. This file tracks the `src/draco` framework; the root `CHANGELOG.md
 - `DracoSettings.require_identity` (`DRACO_REQUIRE_IDENTITY`).
 - A one-time warning when a `tenant_id` is supplied without an `Identity`.
 - Examples `g_secure_tenants`, `h_langgraph`; docs: Security, Adapters and Migration sections in `docs/api-guide.md`.
+- **LangGraph checkpoint adapter** (`draco.adapters.langgraph_checkpoint`): stable execution/thread configuration, optional SQLite saver factory, validated approval resume commands and interrupt helpers. LangGraph and `langgraph-checkpoint-sqlite` remain behind the `agents` extra.
 - CI: the `draco-core` job installs `.[dev,providers]` and builds and imports a non-editable wheel without `app`.
 
 ### Changed
@@ -40,6 +41,5 @@ Newest first. This file tracks the `src/draco` framework; the root `CHANGELOG.md
 - Not verified: a GitHub Actions run, live vLLM/Qdrant/OpenSearch/Redis, live calls to the HTTP providers (tested against `httpx.MockTransport` only).
 
 ### Still open
-- The starter app's own LangGraph `AgentRunner` keeps its state in memory. `graph_workload` accepts any LangGraph checkpointer for your own graphs, but no durable checkpointer is wired into the app.
 - Time-window rate limiting (only a concurrency cap exists), encryption at rest, and a built-in authentication provider.
 - `looks_injected` is duplicated in `app/agent/web.py` and `draco/tools/safety.py` because the app image ships without `draco`; `tests/draco/unit/test_injection_parity.py` fails if they diverge.

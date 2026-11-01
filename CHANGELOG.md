@@ -1,9 +1,19 @@
-# Changelog: PDF detection and Docling conversion stage
+# Changelog: Draco application and framework
 
 > Framework (`src/draco`) changes are tracked in [docs/DRACO_CHANGELOG.md](docs/DRACO_CHANGELOG.md).
 
 Newest entry first. Iterations 4 and 5 touch the ingestion pipeline, the stores, the registry and their tests. Iterations 1 and 2 were limited to `app/ingestion/pdf_detector.py`,
 `app/ingestion/convert.py` and `tests/`; Iteration 3 also touches the registry, upload route and worker.
+
+---
+
+## Iteration 6: Durable LangGraph execution (2026-11-01)
+
+- Added a SQLite-backed checkpointer for agent graph state, pending task writes, integrity checks, expiry cleanup and cross-process recovery.
+- Persisted execution identity, request, response and lifecycle status separately from graph checkpoints.
+- Added owner-scoped execution inspection and approval/rejection resume endpoints. Invalid decisions are rejected before graph invocation; stale approval interrupts can be reconciled after process restart.
+- Added the optional framework checkpoint adapter and kept LangGraph imports out of the framework's default import path.
+- Documented the two SQLite stores, 30-day checkpoint retention, approval flow, restart behavior and the API's user-scoped tenant limitation.
 
 ---
 
