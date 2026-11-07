@@ -241,3 +241,22 @@ def convert_pdf(pdf_path: str | Path, routing: str | None = None) -> PdfConversi
 def convert_document(pdf_path: str | Path):
     """Return Docling's structured document for the PDF."""
     return convert_pdf(pdf_path).document
+
+
+@lru_cache(maxsize=1)
+def _get_office_converter() -> DocumentConverter:
+    # DOCX and HTML go through Docling's simple (non-PDF) pipelines: no OCR, no layout model.
+    return DocumentConverter(allowed_formats=[InputFormat.DOCX, InputFormat.HTML])
+
+
+def convert_office(path: str | Path) -> DoclingDocument:
+    """Convert a .docx or .html file with Docling. Size/ZIP limits are checked by the caller
+    (app.ingestion.formats) before this runs."""
+    try:
+        result = _get_office_converter().convert(str(path))
+    except Exception:
+        logger.exception("Docling conversion failed for %s", Path(path).suffix.lower())
+        raise
+    if result.status != ConversionStatus.SUCCESS:
+        raise ValueError(f"Docling conversion finished with status {result.status}")
+    return result.document

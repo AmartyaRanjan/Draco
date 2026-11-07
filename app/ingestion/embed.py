@@ -6,7 +6,6 @@ from sentence_transformers import SentenceTransformer
 
 from app.ingestion.schema import ChunkRecord
 
-
 MODEL_ID = os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
 DEVICE = os.getenv(
     "EMBEDDING_DEVICE",
@@ -72,4 +71,5 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
 
 
 def embed_chunks(chunks: list[ChunkRecord]) -> list[list[float]]:
-    return embed_texts([chunk.text for chunk in chunks])
+    # Header + text when a contextual header is set; the stored/cited text stays chunk.text.
+    return embed_texts([chunk.index_text() for chunk in chunks])

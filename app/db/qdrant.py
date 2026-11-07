@@ -4,7 +4,6 @@ from uuid import UUID, uuid5
 
 from qdrant_client import QdrantClient, models
 
-
 COLLECTION_NAME = os.getenv("QDRANT_COLLECTION", "rag_chunks")
 VECTOR_SIZE = int(os.getenv("EMBEDDING_DIMENSIONS", "1024"))
 NAMESPACE = UUID("e746b09d-4e6b-46f5-a66a-0df64fbacdd0")
@@ -76,7 +75,7 @@ def upsert_chunks(chunks: list[dict], vectors: list[list[float]]) -> None:
 
     points = []
 
-    for chunk, vector in zip(chunks, vectors):
+    for chunk, vector in zip(chunks, vectors, strict=True):
         if len(vector) != VECTOR_SIZE:
             raise ValueError(
                 f"Expected {VECTOR_SIZE} dimensions; got {len(vector)}."
