@@ -12,6 +12,9 @@ Newest first. This file tracks the `src/draco` framework; the root `CHANGELOG.md
 - `scripts/draco_live_eval.py`: five eval suites (qa, grounded, routing, tools, termination) through the harness against `OpenAICompatProvider` or `AnthropicProvider`; skips cleanly without `DRACO_EVAL_PROVIDER`.
 - `draco.adapters.app_chat.chat_workload` and `agent_resume_workload`: the starter app's `/chat`, `/agent/chat` and resume run as Draco workloads with one execution id.
 
+### Fixed
+- `ExecutionResult.raise_for_status()` re-raised every failure as a bare `DracoError`, losing the error's class, `code`, `retryable` and `details`. A router propagating a child agent's failure therefore turned a policy denial into a generic error and a retryable provider outage into a non-retryable one. It now rebuilds the original typed error (`PolicyViolation`, `ContractError`, `ProviderError`, ...), keeping `code`, `retryable` and `details`; budget, timeout and cancellation keep their details too. Found by building `draco-helpdesk` on the library; tests in `tests/draco/unit/test_raise_for_status.py` fail without the change.
+
 ### Changed
 - `draco.tools.safety.looks_injected` is now the only copy; the app imports it (the parity test checks that).
 - The starter app's agent tool calls run under an explicit tool policy; under Draco's default deny-all policy they are refused.

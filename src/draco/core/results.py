@@ -6,7 +6,25 @@ from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from typing import Any
 
-from draco.core.errors import BudgetExhausted, DracoError, ExecutionCancelled, ExecutionTimeout
+from draco.core.errors import (
+    BudgetExhausted,
+    ConfigurationError,
+    ContractError,
+    DracoError,
+    ExecutionCancelled,
+    ExecutionTimeout,
+    PersistenceError,
+    PluginError,
+    PolicyViolation,
+    ProviderError,
+    RoutingError,
+    ToolError,
+)
+
+# Failure categories that can be rebuilt from an ErrorInfo (code -> class).
+_BY_CODE: dict[str, type[DracoError]] = {c.code: c for c in (
+    ConfigurationError, ContractError, RoutingError, ToolError, ProviderError, PolicyViolation,
+    PersistenceError, PluginError)}
 
 
 class Status(StrEnum):
@@ -85,17 +103,29 @@ class ExecutionResult:
         return d
 
     def raise_for_status(self) -> None:
+        """Re-raise a failure as the same typed error it started as, keeping `code`, `retryable` and
+        `details`, so a caller (for example a router propagating a child's failure) can still tell a
+        policy denial from a provider outage."""
         if self.ok:
             return
         e = self.error
+        exc: DracoError
         if self.status == Status.timeout:
-            raise ExecutionTimeout(e.message if e else "timeout")
-        if self.status == Status.cancelled:
-            raise ExecutionCancelled(e.message if e else "cancelled")
-        if self.status == Status.budget_exhausted:
-            raise BudgetExhausted((e.details.get("resource") if e else None) or "unknown",
-                                  (e.details.get("limit") if e else 0) or 0)
-        raise DracoError(e.message if e else f"execution ended with status {self.status.value}")
+            exc = ExecutionTimeout(e.message if e else "timeout")
+        elif self.status == Status.cancelled:
+            exc = ExecutionCancelled(e.message if e else "cancelled")
+        elif self.status == Status.budget_exhausted:
+            exc = BudgetExhausted((e.details.get("resource") if e else None) or "unknown",
+                                  (e.details.get("limit") if e else 0) or 0, e.message if e else None)
+        else:
+            message = e.message if e else f"execution ended with status {self.status.value}"
+            exc = _BY_CODE.get(e.code, DracoError)(message) if e else DracoError(message)
+            if e and exc.code != e.code:   # a category without its own class: keep the original code
+                exc.code = e.code
+        if e:
+            exc.retryable = e.retryable
+            exc.details = dict(e.details)
+        raise exc
 
 
 def status_for(exc: BaseException) -> Status:
