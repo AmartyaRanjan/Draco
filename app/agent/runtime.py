@@ -187,7 +187,9 @@ class RuntimeAdapter:
                       streaming=streaming, extra_body=extra)
         if json_mode:  # via extra_body: the SDK's parse() helper would raise on truncated output instead of returning it
             extra["response_format"] = {"type": "json_object"}
-        llm = cls(**kwargs)
+        from app.agent.grounding import GovernedModel
+
+        llm = GovernedModel(cls(**kwargs), model=s.model)  # budgeted/evented when run under the harness
         # Only now is the configuration actually applied to a request-bound client.
         decision.applied = decision.planned
         decision.applied_config = dict(decision.config)

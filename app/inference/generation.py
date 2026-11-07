@@ -1,9 +1,10 @@
 """Chat orchestration: memory -> retrieval -> LLM (-> tools) -> validated response.
 
-The orchestrator, not the model, is the source of truth for tool execution and citations.
+The orchestrator, not the model, is the source of truth for tool execution and citations. Model calls,
+the retrieval tool call, tool governance and citation resolution are the ones `AgentRunner` uses
+(`app.agent.grounding`); over HTTP the orchestrator runs as a Draco workload (`app.agent.harness`).
 """
 import asyncio
-import json
 import logging
 import re
 import time
@@ -11,8 +12,12 @@ import uuid
 from typing import Awaitable, Callable
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
+from draco.core.errors import PolicyViolation
 from pydantic import ValidationError
 
+from app.agent.grounding import (THINK, GovernedModel, ThinkFilter, begin_tool, end_tool, filenames_for,
+                                 invoke_model, is_framework_error, resolve_markers, scoped_retrieve,
+                                 thinking_exhausted)
 from app.inference import prompts
 from app.inference.client import build_llm, map_error
 from app.inference.config import InferenceSettings
@@ -28,41 +33,15 @@ from app.retrieval.timing import Trace
 
 logger = logging.getLogger("rag.inference")
 Emit = Callable[[dict], Awaitable[None]]
-_THINK = re.compile(r"<think>.*?</think>", re.S)
+_THINK = THINK
 _LABEL = re.compile(r"\[(S\d+)\]")
-
-
-class ThinkFilter:
-    """Defensive: drop <think>…</think> from streamed text if the server parser is misconfigured."""
-
-    def __init__(self):
-        self.buf, self.inside = "", False
-
-    def feed(self, text: str) -> str:
-        self.buf += text
-        out = ""
-        while True:
-            if self.inside:
-                j = self.buf.find("</think>")
-                if j < 0:
-                    self.buf = self.buf[-8:]
-                    return out
-                self.buf, self.inside = self.buf[j + 8:], False
-            else:
-                j = self.buf.find("<think>")
-                if j >= 0:
-                    out += self.buf[:j]
-                    self.buf, self.inside = self.buf[j + 7:], True
-                    continue
-                keep = 6 if "<think>"[:1] in self.buf[-6:] else 0  # hold a possible partial tag
-                out += self.buf[:len(self.buf) - keep]
-                self.buf = self.buf[len(self.buf) - keep:]
-                return out
+__all__ = ["ChatOrchestrator", "ThinkFilter"]
 
 
 class _Call:
     def __init__(self, content, tool_calls, usage, finish_reason, ttft_ms, total_ms):
         self.content, self.tool_calls, self.usage = content, tool_calls, usage
+        self.text = content
         self.finish_reason, self.ttft_ms, self.total_ms = finish_reason, ttft_ms, total_ms
 
 
@@ -78,45 +57,27 @@ class ChatOrchestrator:
     # ---- LLM -------------------------------------------------------------------------
     async def _call(self, messages: list[BaseMessage], *, thinking: bool, max_tokens, tools: bool,
                     emit: Emit | None, trace: Trace, name: str) -> _Call:
-        llm = self.llm_factory(self.s, thinking=thinking, max_tokens=max_tokens, streaming=emit is not None)
+        llm = GovernedModel(self.llm_factory(self.s, thinking=thinking, max_tokens=max_tokens,
+                                             streaming=emit is not None), model=self.s.model)
         if tools:
             llm = llm.bind_tools(tool_specs())
-        t0, first, last, acc, gaps = time.perf_counter(), None, None, None, []
-        flt = ThinkFilter()
+        t0 = time.perf_counter()
         try:
-            if emit is None:
-                acc = await llm.ainvoke(messages)
-                first = time.perf_counter()
-            else:
-                async for chunk in llm.astream(messages):
-                    acc = chunk if acc is None else acc + chunk
-                    text = chunk.content if isinstance(chunk.content, str) else ""
-                    text = flt.feed(text) if text else ""
-                    if text:
-                        now = time.perf_counter()
-                        if first is None:
-                            first = now
-                        elif last is not None:
-                            gaps.append(now - last)
-                        last = now
-                        await emit({"event": "token", "text": text})
+            call = await invoke_model(llm, messages, emit=emit)
         except asyncio.CancelledError:
             trace.record(name, int(t0 * 1e9), "cancelled")
             raise
+        except InferenceError:
+            trace.record(name, int(t0 * 1e9), "error", "InferenceError")
+            raise
         except Exception as exc:
             trace.record(name, int(t0 * 1e9), "error", type(exc).__name__)
+            if is_framework_error(exc):
+                raise  # budget/policy/deadline: the harness reports it
             raise map_error(exc) from exc
-        end = time.perf_counter()
-        if acc is None:
-            raise InferenceError("Empty response from model", "llm_empty", 502)
-        usage = getattr(acc, "usage_metadata", None) or {}
-        content = _THINK.sub("", acc.content if isinstance(acc.content, str) else "").strip()
-        trace.stages[name] = {"ms": round((end - t0) * 1e3, 3), "status": "ok",
-                              "ttft_ms": round((first - t0) * 1e3, 3) if first else None,
-                              "mean_inter_token_ms": round(sum(gaps) / len(gaps) * 1e3, 3) if gaps else None}
-        return _Call(content, list(acc.tool_calls or []), usage,
-                     (acc.response_metadata or {}).get("finish_reason"),
-                     trace.stages[name]["ttft_ms"], trace.stages[name]["ms"])
+        trace.stages[name] = {"ms": call.total_ms, "status": "ok", "ttft_ms": call.ttft_ms,
+                              "mean_inter_token_ms": call.mean_inter_token_ms}
+        return _Call(call.text, call.tool_calls, call.usage, call.finish_reason, call.ttft_ms, call.total_ms)
 
     # ---- prompt ----------------------------------------------------------------------
     def _history_messages(self, ctx) -> tuple[list[BaseMessage], str]:
@@ -141,8 +102,10 @@ class ChatOrchestrator:
         return "\n\n".join(parts)
 
     # ---- main ------------------------------------------------------------------------
-    async def run(self, req: ChatRequest, user_id: str, emit: Emit | None = None) -> ChatResponse:
-        s, rid = self.s, str(uuid.uuid4())
+    async def run(self, req: ChatRequest, user_id: str, emit: Emit | None = None, *,
+                  request_id: str | None = None) -> ChatResponse:
+        """`request_id` is the Draco execution id when run as a workload (one identity across layers)."""
+        s, rid = self.s, request_id or str(uuid.uuid4())
         trace = Trace(rid)
         conv_id = req.conversation_id or new_conversation_id()
         thinking = req.thinking if req.thinking is not None else req.mode == "agent"
@@ -180,20 +143,16 @@ class ChatOrchestrator:
             filenames_cache: dict[str, str | None] = {}
 
             async def do_search(query: str, doc_ids: list[str] | None):
-                allowed = req.document_ids
-                if doc_ids and allowed and not set(doc_ids) <= set(allowed):
-                    raise PermissionError("document outside the permitted set")
-                scope = doc_ids or allowed
-                outcome = await self.retrieval.retrieve(query, scope, rid + f"-{len(tool_trace)}", user_id)
+                # ScopeDenied (a PermissionError) when the model tries to widen the caller's document scope
+                outcome = await scoped_retrieve(self.retrieval, query, doc_ids, req.document_ids,
+                                                request_id=rid + f"-{len(tool_trace)}", principal=user_id)
                 for st, v in outcome.trace.stages.items():
                     trace.stages[f"retrieval.{st}"] = v
                 degraded.extend(d for d in outcome.degraded if d not in degraded)
                 sel = outcome.selection
                 if not sel or not sel.selected:
                     return "No relevant evidence found.", "0 evidence blocks"
-                for c in sel.selected:
-                    if c.document_id not in filenames_cache:
-                        filenames_cache[c.document_id] = self.retrieval.filename_for(c.document_id)
+                filenames_for(self.retrieval, (c.document_id for c in sel.selected), filenames_cache)
                 text, labels = evidence.add_many(
                     sel.selected, filenames_cache, min(ev_budget["left"], s.tool_output_tokens))
                 ev_budget["left"] -= self.counter.count(text)
@@ -214,7 +173,8 @@ class ChatOrchestrator:
 
             if req.mode == "rag":
                 try:
-                    outcome = await self.retrieval.retrieve(req.message, req.document_ids, rid, user_id)
+                    outcome = await scoped_retrieve(self.retrieval, req.message, req.document_ids, None,
+                                                    request_id=rid, principal=user_id)
                 except RetrievalError as exc:
                     raise InferenceError(f"Retrieval failed ({exc.stage})", "retrieval_failed",
                                          exc.status_code) from exc
@@ -224,7 +184,7 @@ class ChatOrchestrator:
                 sel = outcome.selection
                 text = ""
                 if sel and sel.selected:
-                    names = {c.document_id: self.retrieval.filename_for(c.document_id) for c in sel.selected}
+                    names = filenames_for(self.retrieval, (c.document_id for c in sel.selected), {})
                     text, _ = evidence.add_many(sel.selected, names, s.evidence_budget())
                     meta["evidence_sufficient"] = sel.evidence_sufficient
                 if not evidence.items:
@@ -236,8 +196,7 @@ class ChatOrchestrator:
                 call = await self._call(messages, thinking=thinking, max_tokens=max_tokens, tools=False,
                                         emit=emit, trace=trace, name="llm_call_1")
                 add_usage(call)
-                if thinking and not call.content and call.finish_reason == "length":
-                    # Thinking consumed the whole output budget: one bounded retry without thinking.
+                if thinking_exhausted(call, thinking):  # one bounded retry without thinking
                     meta["thinking"] = False
                     call = await self._call(messages, thinking=False, max_tokens=max_tokens, tools=False,
                                             emit=emit, trace=trace, name="llm_call_2")
@@ -276,10 +235,14 @@ class ChatOrchestrator:
         except BaseException as exc:
             if not trace.stages.get("total"):
                 trace.finish("error")
-            err = exc if isinstance(exc, InferenceError) else None
             if emit:
-                await emit({"event": "error", "code": err.code if err else "internal",
-                            "message": str(err) if err else "Internal error"})
+                if isinstance(exc, InferenceError):
+                    code, message = exc.code, str(exc)
+                elif is_framework_error(exc):  # budget, policy or deadline of the Draco execution
+                    code, message = exc.code, exc.message
+                else:
+                    code, message = "internal", "Internal error"
+                await emit({"event": "error", "code": code, "message": message})
             raise
 
     async def _exec_tool(self, tc, step, n_tools, tctx, tool_trace, tool_outputs, rid, emit) -> str:
@@ -294,10 +257,14 @@ class ChatOrchestrator:
         elif n_tools > self.s.agent_max_tool_calls:
             status, out, summary = "limit_exceeded", "Tool call limit reached; answer now.", "Tool limit reached"
         else:
+            gate = None
             try:
                 args = tool.args.model_validate(raw_args)
                 safe_in = args.model_dump()
+                gate = await begin_tool(name, group="inference", purpose=tool.purpose)  # policy + budget
                 out, summary = await asyncio.wait_for(tool.run(args, tctx), self.s.tool_timeout_s)
+            except PolicyViolation:
+                status, out, summary = "denied", "Not permitted.", "Denied by execution policy"
             except ValidationError as exc:
                 status = "invalid_arguments"
                 out = "Invalid arguments: " + "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['msg']}" for e in exc.errors())
@@ -307,8 +274,12 @@ class ChatOrchestrator:
             except PermissionError:
                 status, out, summary = "denied", "Not permitted.", "Denied by authorization policy"
             except Exception as exc:
+                if is_framework_error(exc):
+                    raise  # budget exhausted / deadline: the run ends, not just the call
                 logger.error("tool_failed", extra={"tool": name, "error": type(exc).__name__})
                 status, out, summary = "error", "Tool failed.", "Tool failed"
+            if gate is not None:
+                await end_tool(gate, status, output_chars=len(out))
         ms = round((time.perf_counter() - t0) * 1e3, 3)
         ref = f"{rid}:{step}:{len(tool_trace)}"
         tool_outputs[ref] = out
@@ -321,16 +292,7 @@ class ChatOrchestrator:
 
     async def _finish(self, req, user_id, trace, meta, answer, evidence, tool_trace, tool_outputs,
                       usage, calls, degraded, finish, abstained, emit) -> ChatResponse:
-        answer = _THINK.sub("", answer).strip()
-        valid, invalid, seen = [], [], set()
-        for label in _LABEL.findall(answer):
-            if label in seen:
-                continue
-            seen.add(label)
-            cit = evidence.citation(label)
-            (valid if cit else invalid).append(cit or label)
-        for label in invalid:  # never let an unverifiable reference reach the client
-            answer = answer.replace(f"[{label}]", "")
+        answer, valid, invalid = resolve_markers(_THINK.sub("", answer).strip(), _LABEL, evidence.citation)
         meta.update(abstained=abstained, degraded_retrievers=degraded, invalid_citation_markers=invalid,
                     finish_reason=finish, llm_calls=calls, usage=usage)
         trace.finish("degraded" if degraded else "ok")

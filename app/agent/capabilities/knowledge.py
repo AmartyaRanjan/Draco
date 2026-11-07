@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 from app.agent.contracts import CapabilityError, Empty, ErrorCode, Outcome
 from app.agent.capabilities.common import check_scope, require, safe_id
+from app.agent.grounding import ScopeDenied, filenames_for, scoped_retrieve
 from app.agent.registry import Capability
 from app.retrieval.schema import RetrievalError
 
@@ -56,12 +57,12 @@ class SearchKBOut(BaseModel):
 async def search_knowledge_base(a: SearchKBIn, ctx):
     svc = ctx.services
     retrieval = require(svc.retrieval, "Knowledge retrieval")
-    scope = a.document_ids
-    if scope and ctx.document_scope and not set(scope) <= set(ctx.document_scope):
-        raise CapabilityError(ErrorCode.denied, "Document outside the permitted set.")
-    scope = scope or ctx.document_scope
-    try:
-        out = await retrieval.retrieve(a.query, scope, f"{ctx.trace_id}-kb{len(ctx.scratch.setdefault('kb_calls', []))}", ctx.user_id)
+    try:  # the retrieval tool call shared with /chat: narrow (never widen) the scope, then the hybrid pipeline
+        out = await scoped_retrieve(retrieval, a.query, a.document_ids, ctx.document_scope,
+                                    request_id=f"{ctx.trace_id}-kb{len(ctx.scratch.setdefault('kb_calls', []))}",
+                                    principal=ctx.user_id)
+    except ScopeDenied as exc:
+        raise CapabilityError(ErrorCode.denied, "Document outside the permitted set.") from exc
     except RetrievalError as exc:
         raise CapabilityError(ErrorCode.upstream_error, f"Retrieval failed at stage {exc.stage}.", retryable=True) from exc
     ctx.scratch["kb_calls"].append(a.query)
@@ -71,8 +72,9 @@ async def search_knowledge_base(a: SearchKBIn, ctx):
         raise Empty({"items": [], "degraded_retrievers": out.degraded, "summary": "0 results"})
     budget = a.max_tokens or ctx.scratch.get("evidence_tokens_left", 3000)
     items, skipped = [], 0
+    names = filenames_for(retrieval, (c.document_id for c in sel.selected), {})
     for c in sel.selected:  # whole chunks, in rerank order, within the budget; never truncated silently
-        fn = retrieval.filename_for(c.document_id)
+        fn = names[c.document_id]
         cost = svc.counter.count(c.text) + 40
         if cost > budget:
             skipped += 1
