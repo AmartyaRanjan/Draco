@@ -164,6 +164,18 @@ class FakeChat:
             raise r
         return r
 
+    async def astream(self, messages):
+        """Streams the next scripted reply word by word (usage and finish reason on the last chunk)."""
+        from langchain_core.messages import AIMessageChunk
+
+        r = await self.ainvoke(messages)
+        words = (r.content or "").split(" ")
+        for i, w in enumerate(words):
+            last = i == len(words) - 1
+            yield AIMessageChunk(content=w + ("" if last else " "),
+                                 usage_metadata=r.usage_metadata if last else None,
+                                 response_metadata=r.response_metadata if last else {})
+
 
 def make_runner(script, *, model="Qwen/Qwen3-4B-FP8", conv_store=None, inference=None, **svc_kw):
     FakeChat.script, FakeChat.log = list(script), []

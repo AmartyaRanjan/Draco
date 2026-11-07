@@ -9,6 +9,11 @@ Deterministic functions decide routing, budgets and retries. The LLM is used onl
 inside a bounded, group-filtered agent loop for artifact/visualization/computation tasks, (b) write the final
 answer, (c) summarize evidence when the budget manager demands it. State is plain serializable data; live
 objects (evidence store, clients) live in the per-run context.
+
+Over HTTP the runner is a Draco workload (`app.agent.harness`): its model calls, capability calls and
+retrieval go through `app.agent.grounding`, the same helpers `/chat` uses, so they are budgeted,
+policy-checked, cancellable and evented under the execution. With `emit`, progress is streamed as
+`start`, `step`, `tool_call`, `tool_result`, `token` and `revision` events.
 """
 
 import asyncio
@@ -21,6 +26,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Annotated, Any, TypedDict
 
+from draco.core.errors import DracoError
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
@@ -31,6 +37,8 @@ from app.agent.budget import BudgetConfig, ContextBudget
 from app.agent.capabilities.validation import normalize_citations
 from app.agent.contracts import new_id
 from app.agent.evidence import EvidenceStore
+from app.agent.grounding import (THINK, Emit, invoke_model, is_framework_error, resolve_markers,
+                                 strip_markers, thinking_exhausted)
 from app.agent.registry import CapabilityContext, CapabilityRegistry, TraceRecord
 from app.agent.runtime import ModePolicy, ReasoningController, ReasoningMode, RuntimeAdapter
 from app.agent.schemas import AgentChatRequest, AgentChatResponse, AgentTraceEntry, CitationOut
@@ -40,7 +48,7 @@ from app.inference.memory import ConversationStore
 from app.inference.schemas import InferenceError
 
 logger = logging.getLogger("rag.agent")
-_THINK = re.compile(r"<think>.*?</think>", re.S)
+_THINK = THINK
 _MARK = re.compile(r"\[([SW]\d+)\]")
 
 # ---- intent classification (deterministic) ------------------------------------------------
@@ -191,6 +199,12 @@ class Run:
     manifest: dict | None = None
     pending: list = field(default_factory=list)
     timings: dict = field(default_factory=dict)
+    emit: Emit | None = None  # SSE sink for streamed runs; None = non-streaming
+    conv_id: str | None = None
+
+    async def send(self, event: dict) -> None:
+        if self.emit is not None:
+            await self.emit(event)
 
 
 class AgentRunner:
@@ -211,9 +225,17 @@ class AgentRunner:
 
     # ================= public ===============================================================
     async def run(
-        self, req: AgentChatRequest, user_id: str, tenant_id: str | None = None
+        self,
+        req: AgentChatRequest,
+        user_id: str,
+        tenant_id: str | None = None,
+        *,
+        request_id: str | None = None,
+        emit: Emit | None = None,
     ) -> AgentChatResponse:
-        rid = str(uuid.uuid4())
+        """`request_id` is the Draco execution id when run as a workload (also the LangGraph thread id and
+        the AgentStore execution id). `emit` streams progress events."""
+        rid = request_id or str(uuid.uuid4())
         tenant_id = tenant_id or user_id
         inf = self.inf
         cfg = BudgetConfig(
@@ -242,6 +264,7 @@ class AgentRunner:
             cap_ctx=cctx,
             controller=ReasoningController(self.adapter.caps, max_changes=self.s.max_mode_changes),
             budget=ContextBudget(self.counter, cfg),
+            emit=emit,
         )
         conv_id = req.conversation_id or str(uuid.uuid4())
         run.conv_id = conv_id
@@ -275,6 +298,7 @@ class AgentRunner:
             "node_log": [],
         }
         t0 = time.perf_counter()
+        await run.send({"event": "start", "request_id": rid, "conversation_id": conv_id})
         try:
             graph = self._build(run)
             final = await graph.ainvoke(
@@ -295,13 +319,13 @@ class AgentRunner:
                 expected_status="running",
             )
             raise
-        except InferenceError:
+        except (InferenceError, DracoError) as exc:  # DracoError: budget, policy or deadline of the execution
             self.svc.store.update_execution(
                 rid,
                 user_id,
                 tenant_id,
                 status="failed",
-                error="inference_error",
+                error="inference_error" if isinstance(exc, InferenceError) else f"execution_{exc.code}",
                 expected_status="running",
             )
             raise
@@ -610,9 +634,11 @@ class AgentRunner:
 
         def node(name, fn):
             async def wrapped(state):
+                await run.send({"event": "step", "node": name, "phase": "start"})
                 t0 = time.perf_counter()
                 out = await fn(run, state)
                 ms = round((time.perf_counter() - t0) * 1e3, 2)
+                await run.send({"event": "step", "node": name, "phase": "end", "ms": ms})
                 out = dict(out or {})
                 out["node_log"] = [{"node": name, "ms": ms}]
                 return out
@@ -687,8 +713,26 @@ class AgentRunner:
         if c["tool_calls"] >= self.s.max_tool_calls:
             return None, c
         c["tool_calls"] += 1
-        res = await self.reg.execute(name, args, run.cap_ctx, purpose=purpose, sink=run.trace)
+        res = await self._call_capability(run, name, args, purpose)
         return res, c
+
+    async def _call_capability(self, run: Run, name: str, args, purpose: str):
+        """Every capability call of a run: the registry's execution wrapper (validation, permissions,
+        timeout, trace, Draco policy/budget) plus `tool_call`/`tool_result` stream events."""
+        await run.send({"event": "tool_call", "tool": name, "purpose": purpose})
+        res = await self.reg.execute(name, args, run.cap_ctx, purpose=purpose, sink=run.trace)
+        meta = getattr(res, "metadata", None)
+        await run.send(
+            {
+                "event": "tool_result",
+                "tool": name,
+                "status": res.status,
+                "summary": ((res.data or {}).get("summary") if res.data else None)
+                or (res.error.message if res.error else ""),
+                "duration_ms": getattr(meta, "duration_ms", None),
+            }
+        )
+        return res
 
     def _record(self, name, res) -> dict:
         return {
@@ -909,6 +953,8 @@ class AgentRunner:
                         ).ainvoke(msgs)
                         break
                     except Exception as exc:
+                        if is_framework_error(exc):
+                            raise
                         # prompt + max_tokens overran the window by the template/tool-schema overhead our counter cannot see;
                         # the server does not say by how much, so shrink the output cap geometrically (bounded).
                         smaller = reduced_output_cap(exc, cap) if shrinks < 4 else None
@@ -927,6 +973,8 @@ class AgentRunner:
                         else:
                             raise
             except Exception as exc:
+                if is_framework_error(exc):
+                    raise
                 raise map_error(exc) from exc
             c["llm_steps"] += 1
             self._usage(run, ai)
@@ -993,9 +1041,7 @@ class AgentRunner:
                         and fmt in (("docx", "pdf") if name == "generate_document" else ("xlsx", "csv"))
                     ):
                         targs["format"] = fmt  # an explicit user format request overrides the model's default
-                    res = await self.reg.execute(
-                        name, targs, run.cap_ctx, purpose=f"agent step {step + 1}", sink=run.trace
-                    )
+                    res = await self._call_capability(run, name, targs, f"agent step {step + 1}")
                     results.append(self._record(name, res))
                     res_txt = self._tool_message(run, name, res)
                 msgs.append(ToolMessage(content=res_txt, tool_call_id=tc.get("id") or new_id()))
@@ -1339,26 +1385,32 @@ class AgentRunner:
             )
             run.decisions.append(d)
         max_tokens = min(run.req.max_output_tokens or self.inf.max_output_tokens, self.inf.max_output_tokens)
+        # Tool-task replies can echo internal notes and are then replaced by a template: never stream them.
+        stream = run.emit if i not in TOOL_INTENTS else None
+        if stream is not None and state.get("status") == "revise":
+            await run.send({"event": "revision", "reason": "the answer is being revised after citation checks"})
         try:
-            ai = await self.adapter.build_llm(d, max_tokens=max_tokens).ainvoke(msgs)
-            self._usage(run, ai)
-            text = _THINK.sub("", ai.content if isinstance(ai.content, str) else "").strip()
-            finish = (ai.response_metadata or {}).get("finish_reason")
-            if (
-                not text and finish == "length" and d.planned == ReasoningMode.thinking
-            ):  # thinking ate the budget: retry once, non-thinking
+            call = await invoke_model(
+                self.adapter.build_llm(d, max_tokens=max_tokens, streaming=stream is not None), msgs, emit=stream
+            )
+            self._usage(run, call.message)
+            text, finish = call.text, call.finish_reason
+            if thinking_exhausted(call, d.planned == ReasoningMode.thinking):  # retry once, non-thinking
                 d2 = run.controller.request(
                     ReasoningMode.non_thinking, "thinking exhausted the output budget"
                 )
                 run.decisions.append(d2)
                 if d2.planned == ReasoningMode.non_thinking:
-                    ai = await self.adapter.build_llm(d2, max_tokens=max_tokens).ainvoke(msgs)
-                    self._usage(run, ai)
-                    text, finish = (
-                        _THINK.sub("", ai.content if isinstance(ai.content, str) else "").strip(),
-                        (ai.response_metadata or {}).get("finish_reason"),
+                    call = await invoke_model(
+                        self.adapter.build_llm(d2, max_tokens=max_tokens, streaming=stream is not None),
+                        msgs,
+                        emit=stream,
                     )
+                    self._usage(run, call.message)
+                    text, finish = call.text, call.finish_reason
         except Exception as exc:
+            if is_framework_error(exc) or isinstance(exc, InferenceError):
+                raise
             raise map_error(exc) from exc
         if i in TOOL_INTENTS and (
             not text or any(r["tool"] in text for r in results) or "INTERNAL NOTES" in text
@@ -1447,12 +1499,11 @@ class AgentRunner:
             )
         )
         mode = "tool_task" if state["classification"]["intent"] in TOOL_INTENTS else "strict"
-        res = await self.reg.execute(
+        res = await self._call_capability(
+            run,
             "validate_citations",
             {"answer": ans, "user_context": user_ctx[:8000], "mode": mode},
-            run.cap_ctx,
-            purpose="verify citations before returning",
-            sink=run.trace,
+            "verify citations before returning",
         )
         if not res.ok:
             return {
@@ -1483,9 +1534,7 @@ class AgentRunner:
                 "status": "revise",
                 "revise_problems": "; ".join(problems),
             }
-        if v["invalid_refs"]:  # never let an unverifiable reference reach the client
-            for r in v["invalid_refs"]:
-                ans = ans.replace(f"[{r}]", "")
+        ans = strip_markers(ans, v["invalid_refs"])  # never let an unverifiable reference reach the client
         out = {
             "answer": ans,
             "validation": v,
@@ -1522,12 +1571,8 @@ class AgentRunner:
                 self.svc.store.approve_source(source_id, run.user_id, approve=decision == "approve")
                 if decision == "approve":
                     approved.append(p)
-                    result = await self.reg.execute(
-                        "ingest_approved_source",
-                        {"source_id": source_id},
-                        run.cap_ctx,
-                        purpose="user-approved source ingestion",
-                        sink=run.trace,
+                    result = await self._call_capability(
+                        run, "ingest_approved_source", {"source_id": source_id}, "user-approved source ingestion"
                     )
                     outcomes.append(self._record("ingest_approved_source", result))
                 else:
@@ -1555,13 +1600,14 @@ class AgentRunner:
     # ================= response ==============================================================
     def _response(self, run: Run, final, conv_id, total_ms) -> AgentChatResponse:
         ans = final.get("answer", "")
-        refs = [r for r in dict.fromkeys(_MARK.findall(ans)) if run.evidence.get(r)]
+        # Only markers that resolve to this run's evidence become citations (validation already stripped the
+        # unresolved ones from model answers; deterministic answers carry none).
+        _, items, _ = resolve_markers(ans, _MARK, run.evidence.get)
         cits = []
-        for r in refs:
-            it = run.evidence.get(r)
+        for it in items:
             cits.append(
                 CitationOut(
-                    ref=r,
+                    ref=it.ref,
                     kind=it.kind,
                     document_id=it.document_id,
                     chunk_id=it.chunk_id,
