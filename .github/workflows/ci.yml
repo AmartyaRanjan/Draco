@@ -37,7 +37,9 @@ jobs:
         with: {python-version: "${{ matrix.python-version }}"}
       - name: Install draco with dev tools only
         run: |
-          python -m pip install --upgrade pip
+          # setuptools is upgraded too: the 3.11 runner image bundles one with known vulnerabilities, and the
+          # dependency audit below scans the whole environment.
+          python -m pip install --upgrade pip "setuptools>=84.1.0"
           pip install -e ".[dev,providers]"
       - name: Reject tracked runtime data
         run: |
