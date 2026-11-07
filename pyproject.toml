@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]  # 77+ for the SPDX `license` expression and `license-files`
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,10 +8,33 @@ version = "0.1.0"
 description = "Embeddable agent runtime: harness, routing, tools, security, state and observability, with optional adapters"
 readme = "README.md"
 requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Amartya Ranjan" }]
+keywords = ["rag", "agents", "llm", "harness", "orchestration", "retrieval", "langgraph", "tool-use", "multi-tenant"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
 # The native framework (core, harness, agents, routing, tools, security, state, observability) needs only
 # pydantic. Everything else is an optional extra; adapters for the starter RAG app (`app`) need its own
 # stack (requirements.txt) and are never imported by the core.
 dependencies = ["pydantic>=2.6"]
+
+[project.urls]
+Homepage = "https://github.com/AmartyaRanjan/Draco"
+Documentation = "https://github.com/AmartyaRanjan/Draco/blob/main/docs/README.md"
+Source = "https://github.com/AmartyaRanjan/Draco"
+Issues = "https://github.com/AmartyaRanjan/Draco/issues"
+Changelog = "https://github.com/AmartyaRanjan/Draco/blob/main/docs/DRACO_CHANGELOG.md"
+"Security Policy" = "https://github.com/AmartyaRanjan/Draco/blob/main/SECURITY.md"
 
 [project.optional-dependencies]
 agents = ["langgraph>=1.0", "langchain-core", "langgraph-checkpoint-sqlite>=2.0"]  # draco.adapters.langgraph

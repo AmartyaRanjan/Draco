@@ -16,7 +16,7 @@ ARG TORCHVISION_VERSION=0.29.2
 COPY requirements.txt .
 RUN if [ -n "$TORCH_INDEX_URL" ]; then pip install --index-url "$TORCH_INDEX_URL" "$(grep -E '^torch==' requirements.txt)" "torchvision==$TORCHVISION_VERSION"; fi \
  && pip install -r requirements.txt
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md LICENSE ./
 COPY src ./src
 RUN pip install --no-deps . && rm -rf src build \
  && python -c "import draco, docling, torchvision; from transformers import AutoImageProcessor; import torchvision.ops as o; o.nms"
