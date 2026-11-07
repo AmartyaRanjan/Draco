@@ -1,7 +1,7 @@
 beautifulsoup4==4.15.0
 click==8.5.0
 croniter==6.2.4
-docling==2.137.0
+docling==2.142.0
 fastapi==0.143.0
 httpx==0.28.1
 langchain-core==1.6.10
@@ -12,7 +12,7 @@ matplotlib==3.11.2
 openai==3.29.0
 openpyxl==3.1.5
 opensearch-py==3.2.0
-pillow==12.3.0
+pillow==13.0.0
 prometheus-client==0.26.0
 pydantic==2.14.0
 pypdf==6.21.4
