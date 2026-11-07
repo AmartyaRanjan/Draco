@@ -1,0 +1,83 @@
+name: Bug report
+description: Something does not work as documented
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. **Security problems do not belong here.** Read [SECURITY.md](https://github.com/AmartyaRanjan/Draco/blob/main/SECURITY.md) instead.
+        Please remove API keys, tokens and private documents from anything you paste.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Framework core (harness, context, errors, settings)
+        - Agents and router
+        - Tools and MCP
+        - Security (identity, authorization, policy)
+        - State stores (memory, SQLite, PostgreSQL), retention, encryption
+        - Rate limiting
+        - Adapters and model providers
+        - Starter app - ingestion
+        - Starter app - retrieval
+        - Starter app - chat and agent
+        - Starter app - HTTP API and auth
+        - Docker, deploy and CI
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: The smallest code, request or command that shows the problem. A failing test is ideal.
+      render: python
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output, traceback or trace
+      description: Paste the error or relevant trace events. Remove secrets first.
+      render: shell
+  - type: input
+    id: version
+    attributes:
+      label: Draco version or commit
+      description: "Output of `git rev-parse --short HEAD`, or the installed version."
+      placeholder: "e.g. 1b58b7e"
+    validations:
+      required: true
+  - type: input
+    id: python
+    attributes:
+      label: Python version and OS
+      placeholder: "e.g. Python 3.12.4, Ubuntu 24.04"
+    validations:
+      required: true
+  - type: input
+    id: install
+    attributes:
+      label: How you installed it
+      placeholder: 'e.g. pip install -e ".[dev,providers]", or the rag-api Docker image'
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and discussions.
+          required: true
+        - label: This is not a security vulnerability.
+          required: true
+        - label: I removed secrets and private data from what I pasted.
+          required: true
