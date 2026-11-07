@@ -5,8 +5,8 @@ Branch `draco-framework` (uncommitted working tree; nothing pushed). Resume from
 ## Verification (commands run on 2026-10-18 and their actual results)
 | Command | Result |
 |---|---|
-| `python -m pytest tests -q` (system pytest + `.venv` site-packages) | **409 passed, 17 skipped** (baseline before changes: 328 passed, 15 skipped) |
-| `python -m unittest discover -s tests -t .` (the original CI command) | Ran 343 tests, OK (skipped=15): unchanged |
+| `python -m pytest tests -q` (system pytest + `.venv` site-packages) | **699 passed, 29 skipped** (2026-11-07, after the retention/Postgres/memory/ingestion/auth merges; baseline before the framework: 328 passed, 15 skipped) |
+| `python -m unittest discover -s tests -t .` (the original CI command) | Ran 542 tests, OK (skipped=15) (343 before the later merges) |
 | `python -m tests.draco.eval.runner` | routing 10/10, tools 10/10, termination 9/9, rag 7/7 |
 | Clean venv, `pip install -e ".[dev]"` (only pydantic + httpx resolved; no torch/langgraph) | install OK; `ruff check` clean; `mypy src/draco` no issues (41 files); `pytest tests/draco/unit tests/draco/reliability`: 56 passed |
 | Isolated venv with `mcp` 2.3.0 + `opentelemetry-sdk` | real MCP round trip, OTel span tree, MCP fake-client tests: 4 passed (these 2 tests skip in the main `.venv`, which lacks both) |
@@ -53,7 +53,7 @@ Deterministic (no model, network or randomness; nothing to seed): all `tests/dra
 | Failures, timeout, cancel, budget have defined outcomes | **Verified** | `Status` enum, eval `termination` 9/9 |
 | Recovery/retries avoid blind duplication of side effects | **Partially verified** | harness step replay and app AgentRunner approval resume are persisted; ingestion jobs are idempotency-claimed; external exactly-once not claimed |
 | Concurrent executions isolated | **Partially verified** | in-process concurrency and SQLite resume claims are tested; shared multi-host deployments are not supported |
-| Core tests and runnable examples pass | **Verified** | 409 passed; examples run as tests |
+| Core tests and runnable examples pass | **Verified** | 699 passed with the app suite; examples run as tests |
 | Packaging, install, docs, CI | **Partially verified** | clean-venv install, lint, types, audit verified; **CI workflow never run on GitHub**; Docker untouched |
 | Optional integrations not mandatory | **Verified** | boundary test + clean venv without langgraph/torch/mcp/otel |
 | Decisions and limitations documented | **Verified** | this file, `roadmap.md`, `current-state.md` |

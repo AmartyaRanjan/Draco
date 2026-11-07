@@ -178,6 +178,23 @@ class GraphQATests(unittest.TestCase):
         with self.assertRaises(InferenceError):
             run(r.run(AgentChatRequest(message="x", conversation_id=cid), "mallory"))
 
+    def test_rolling_summary_reaches_the_grounded_prompt(self):
+        store = SqliteConversationStore(Path(tempfile.mkdtemp()) / "c.db")
+        r, _ = make_runner(
+            [ai("Revenue was 5 million dollars [S1]."), ai("Still 5 million dollars [S1].")],
+            conv_store=store,
+            retrieval=FakeRetrieval([cand(1, "Revenue was 5 million dollars in 2023.")]),
+        )
+        cid = chat(r, "What was the revenue?").metadata["conversation_id"]
+        state = store.summary_state("alice", cid)
+        store.save_summary("alice", cid, "User is auditing the 2023 annual report.", state.messages[-1]["id"],
+                           state.summary_upto)
+        chat(r, "And again?", conversation_id=cid)
+        system = FakeChat.log[1]["messages"][0].content
+        self.assertIn("Conversation summary - background only, not evidence", system)
+        self.assertIn("auditing the 2023 annual report", system)
+        self.assertNotIn("What was the revenue?", [m.content for m in FakeChat.log[1]["messages"][1:]])
+
     def test_thinking_exhausting_budget_retries_once_without_thinking(self):
         r, _ = make_runner(
             [ai("", finish="length"), ai("Revenue was 5 million dollars [S1].")],

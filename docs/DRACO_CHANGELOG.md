@@ -2,6 +2,31 @@
 
 Newest first. This file tracks the `src/draco` framework; the root `CHANGELOG.md` covers the ingestion pipeline.
 
+## 0.3.0 (unreleased): state, limits and the unified request path
+
+### Added
+- **Retention**: `RetentionStore.purge(older_than=, events_older_than=)` on the in-memory, SQLite and Postgres stores; `apply_retention`, `DracoSettings.execution_retention_days` / `event_retention_days` (`DRACO_EXECUTION_RETENTION_DAYS`, `DRACO_EVENT_RETENTION_DAYS`) and `scripts/draco_retention.py`. Executions in `waiting` or `running`, and their descendants, are never deleted. Purging a completed execution also forgets its idempotency key.
+- **PostgreSQL store**: `draco.state.postgres.PostgresStore` (extra `postgres`, psycopg 3), same schema and in-place migration as SQLite, sharing one SQL implementation. `DRACO_STATE_URL` (a URL containing a password is rejected; use `PGPASSWORD` or `.pgpass`). `Harness` now builds its store from settings (`draco.harness.open_store`) when none is passed; previously `state_path` was ignored.
+- **Time-window rate limiting**: `draco.policies.ratelimit` (`RateLimiter` protocol, in-process `InMemoryRateLimiter`), `tenant_rate_per_minute/_burst`, `user_rate_per_minute/_burst`, `Harness(rate_limiter=)`. Only root executions are limited and idempotent replays are free. An excess run ends `budget_exhausted` with resource `tenant_rate` or `user_rate`, `retryable`, with `retry_after_s`.
+- **Encryption at rest**: `draco.security.crypto.FernetCipher` (extra `crypto`, MultiFernet) for execution input/output/error, event data and step data; the key comes from a `SecretProvider` through `DRACO_STATE_ENCRYPTION_KEY` (the secret's name; comma-separated keys, newest first); `store.rotate_encryption()`. Ids, status, times, tenant/user/roles, usage and policy stay in plain text because lookups and retention query them.
+- `scripts/draco_live_eval.py`: five eval suites (qa, grounded, routing, tools, termination) through the harness against `OpenAICompatProvider` or `AnthropicProvider`; skips cleanly without `DRACO_EVAL_PROVIDER`.
+- `draco.adapters.app_chat.chat_workload` and `agent_resume_workload`: the starter app's `/chat`, `/agent/chat` and resume run as Draco workloads with one execution id.
+
+### Changed
+- `draco.tools.safety.looks_injected` is now the only copy; the app imports it (the parity test checks that).
+- The starter app's agent tool calls run under an explicit tool policy; under Draco's default deny-all policy they are refused.
+
+### Verification
+- `pytest tests/draco`: 172 passed, 14 skipped without Postgres; with `DRACO_TEST_POSTGRES_URL` set the store contract suite also runs against a real `postgres:16-alpine` container (182 passed, 3 skipped).
+- Python 3.11 and 3.12: `tests/draco/unit` and `reliability` pass in clean venvs. `ruff` and `mypy src/draco` clean.
+- Not verified: a GitHub Actions run of the new matrix, live calls through the HTTP providers or the live eval script, multi-process rate limiting.
+
+### Still open
+- The rate limiter is per process; several processes serving one tenant need a shared implementation of the protocol.
+- `rotate_encryption` re-encrypts in one transaction (offline maintenance). Plaintext written before encryption was enabled can linger in Postgres dead rows until `VACUUM FULL`, and in the SQLite WAL until `vacuum()`.
+- The tracer keeps an in-memory trace per execution with no retention option; the app discards it after each top-level run.
+- A built-in authentication provider.
+
 ## 0.2.0 (unreleased): standalone framework
 
 ### Added
@@ -41,5 +66,4 @@ Newest first. This file tracks the `src/draco` framework; the root `CHANGELOG.md
 - Not verified: a GitHub Actions run, live vLLM/Qdrant/OpenSearch/Redis, live calls to the HTTP providers (tested against `httpx.MockTransport` only).
 
 ### Still open
-- Time-window rate limiting (only a concurrency cap exists), encryption at rest, and a built-in authentication provider.
-- `looks_injected` is duplicated in `app/agent/web.py` and `draco/tools/safety.py` because the app image ships without `draco`; `tests/draco/unit/test_injection_parity.py` fails if they diverge.
+- Time-window rate limiting, encryption at rest and the duplicated `looks_injected` were open in 0.2.0 and are resolved in 0.3.0; a built-in authentication provider is still open.

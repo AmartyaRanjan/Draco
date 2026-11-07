@@ -14,11 +14,8 @@ ARG TORCH_INDEX_URL=""
 # CPU-index torch fails at runtime with "operator torchvision::nms does not exist". 0.29.x pairs with torch 2.14.x.
 ARG TORCHVISION_VERSION=0.29.2
 COPY requirements.txt .
-# docling 2.137 requires pillow<13 while requirements.txt pins pillow 13.0.0 (for the API); drop the pillow pin here
-# so the resolver picks the newest pillow docling accepts.
 RUN if [ -n "$TORCH_INDEX_URL" ]; then pip install --index-url "$TORCH_INDEX_URL" "$(grep -E '^torch==' requirements.txt)" "torchvision==$TORCHVISION_VERSION"; fi \
- && grep -v -E '^pillow==' requirements.txt > /tmp/requirements-worker.txt \
- && pip install -r /tmp/requirements-worker.txt && rm /tmp/requirements-worker.txt
+ && pip install -r requirements.txt
 COPY pyproject.toml README.md ./
 COPY src ./src
 RUN pip install --no-deps . && rm -rf src build \

@@ -257,6 +257,10 @@ class HybridMemory:
     async def delete(self, user_id: str, memory_id: str) -> None:
         await self._blocking(self.index.delete, user_id, memory_id)
 
+    async def erase(self, user_id: str) -> None:
+        """Right-to-erasure: remove every memory item this user stored."""
+        await self._blocking(self.index.delete_user, user_id)
+
     async def list(self, user_id: str, limit: int = 100) -> list[MemoryItem]:
         rows = await self._blocking(self.index.list_items, user_id, limit)
         return [MemoryItem(r["memory_id"], r.get("text", ""), r.get("kind") or "fact") for r in rows]

@@ -192,6 +192,7 @@ class Run:
     decisions: list = field(default_factory=list)
     summary: EvidenceSummary | None = None
     summary_rendered: str = ""
+    conv_summary: str = ""  # rolling summary of older turns of this conversation (background, not evidence)
     compact_render: bool = False
     history_cap: int | None = None
     usage: dict = field(default_factory=lambda: {"input_tokens": 0, "output_tokens": 0, "llm_calls": 0})
@@ -274,6 +275,7 @@ class AgentRunner:
             except PermissionError as exc:
                 raise InferenceError("Conversation not found", "conversation_forbidden", 404) from exc
             run.history = ctx.recent
+            run.conv_summary = ctx.summary or ""
         execution_request = req.model_dump(mode="json")
         execution_request["conversation_id"] = conv_id
         self.svc.store.create_execution(rid, user_id, tenant_id, execution_request)
@@ -1090,6 +1092,12 @@ class AgentRunner:
         ]
         return "\n".join(parts)
 
+    def _grounded_system(self, run: Run) -> str:
+        """GROUND prompt plus the rolling conversation summary, so turns folded into it are not lost."""
+        if not run.conv_summary:
+            return prompts.GROUND
+        return f"{prompts.GROUND}\n\n[Conversation summary - background only, not evidence]\n{run.conv_summary}"
+
     def _history_msgs(self, run: Run):
         room = run.history_cap if run.history_cap is not None else self.inf.history_tokens
         kept = []
@@ -1105,7 +1113,7 @@ class AgentRunner:
 
     def _account(self, run: Run, state):
         b = run.budget
-        sys_tokens = b.message_tokens(prompts.GROUND)
+        sys_tokens = b.message_tokens(self._grounded_system(run))
         hist, _ = self._history_msgs(run)
         b.set("system", sys_tokens)
         b.set("history", sum(b.message_tokens(m.content) for m in hist))
@@ -1353,7 +1361,7 @@ class AgentRunner:
         ev = self._evidence_text(run)
         facts = self._results_text(run, results)
         msgs = [
-            SystemMessage(prompts.GROUND),
+            SystemMessage(self._grounded_system(run)),
             *self._history_msgs(run)[0],
             HumanMessage(
                 (f"EVIDENCE:\n{ev}\n" if ev else "EVIDENCE: (none)\n")

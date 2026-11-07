@@ -304,22 +304,21 @@ No semantic deduplication was introduced; exact `chunk_id` dedup, RRF and ColBER
 
 Ordered by how likely they are to bite.
 
-1. **No per-user ownership of documents.** The registry has no owner column, so any authenticated user can retrieve, analyse or read metadata of any registry document;
-   `document_ids` only *narrows*. Conversations, sources, approvals, artifacts and feedback *are* user-scoped. Do not expose this multi-tenant until the registry gets an owner and retrieval filters use it.
+1. **Document ownership is enforced (resolved).** The registry has an `owner_id` column and retrieval is limited to the caller's `completed` documents (see `docs/DOCUMENT_OWNERSHIP.md`). Legacy ownerless rows stay unavailable until an operator assigns them.
 2. **4B model quality.** Tool calling is unreliable without forcing (one failure in three un-forced artifact runs); model-drafted specs can be semantically poor (crossed chart series);
    `thinking` answers can embellish. Mitigations are in place (forced first call, validation, one bounded revision) but they reduce, not remove, the risk. Qwen3-8B-AWQ is the intended upgrade (checked: same template flag).
 3. **Latency/capacity.** Thinking-mode artifact runs take 46–53 s, grounded QA 2–17 s on a GPU shared with other tenants (allocator OOM warnings during runs). vLLM is configured for 2 sequences and ~1.3× concurrency at 8k;
    artifact loops (up to 2400 output tokens, several calls) can queue. No load test was run.
-4. **Graph state is not durable.** The checkpointer is `InMemorySaver`: a process restart loses an in-flight run (approvals, jobs, artifacts, feedback *are* durable in SQLite). A SQLite/Postgres checkpointer is an extra dependency I did not add.
-5. **Human approval is not a LangGraph `interrupt`.** A run that proposes a source ends with status `awaiting_approval`; approval is a separate authenticated HTTP call; ingestion is then triggered by `/approve {"ingest": true}` or `/ingest`. The approval is a verifiable durable record, but the original graph run is not resumed.
+4. **Graph state is durable (resolved).** Checkpoints live in a SQLite saver (`AGENT_CHECKPOINT_PATH`) and runs can be resumed after a restart; see `docs/api-guide.md`.
+5. **Human approval is a LangGraph `interrupt` (resolved).** A run that proposes a source waits for `POST /agent/executions/{id}/resume` with an owner-checked approve/reject decision; ingestion runs only after approval.
 6. **Web ingestion is lossy and PDF-shaped.** The existing worker accepts only PDFs, so an approved page's text snapshot is rendered to a PDF (tables flattened, original HTML not kept). Pages in scripts DejaVu cannot draw (e.g. Devanagari) are refused rather than ingested as blanks.
    The enqueue → worker → index path for these PDFs was not exercised end to end, and **Docling is not installed in this venv** (its model caches exist, so it was installed once) — the worker cannot run from here as-is.
 7. **Providers unconfigured / untested live:** web search (SearXNG/Brave parsing is covered only by mock transports) and image generation. Both report `not_configured` and are visible at `/agent/capabilities`.
-8. **Citation validation is lexical + identifiers + numbers + negation**, not entailment. Paraphrases can be marked "weak". An `entailment` hook exists in `Services` but is not wired to any model. A passing validation does not mean a claim is true.
+8. **Citation validation is lexical + identifiers + numbers + negation by default.** An optional LLM entailment judge (`AGENT_ENTAILMENT_JUDGE=true`, off by default) refines the verdict through the existing `Services.entailment` hook and falls back to the lexical verdict on any error. Its quality on a real model has not been measured; a passing validation does not mean a claim is true.
 9. **Token accounting** is exact for text (Qwen tokenizer) but chat-template overhead (6/message, 8 per prompt) and tool-schema size (JSON dump) are approximations covered by a 128-token safety margin.
 10. **SSRF defences** resolve DNS themselves and connect to the validated IP; that is strong but not a substitute for egress firewalling the host. Redirects are re-validated; there is no domain allow-list or robots.txt handling.
-11. **Observability** is structured logging (`rag.agent`, no document text, secrets redacted) plus the per-request trace in the response. There is no metrics exporter (none existed). Retention (`purge_feedback`, artifact expiry) is implemented but only runs via `scripts/agent_maintenance.py`; there is no HTTP endpoint for deleting a user's feedback.
-12. `/agent/chat` does not stream (the existing `/chat/stream` is unchanged).
+11. **Observability** is structured logging (`rag.agent`, no document text, secrets redacted), the per-request trace in the response, and Draco events/traces for every request (one execution id across layers). Retention for conversations and agent state runs only via `scripts/agent_maintenance.py`; there is no HTTP endpoint for deleting a user's feedback.
+12. `/agent/chat` does not stream, but `/agent/chat/stream` does (events: start, step, tool_call, tool_result, token, revision, then exactly one of done, awaiting_approval, error).
 
 **Things found in the existing repo, deliberately not changed:**
 * `app/storage/uploads/*.pdf` (personal documents) and `app/storage/documents.db` are **tracked in git**. Consider `git rm --cached` + ignoring `app/storage/uploads/` and `*.db`.
@@ -329,11 +328,11 @@ Ordered by how likely they are to bite.
 
 ## 11. Next steps
 
-1. **Add an owner column to the registry** and thread `user_id` into retrieval filters (`resolve_filters` is already the single enforcement point) — unblocks multi-user use.
-2. **Run the real ingestion path once for a web source** in a scratch index: install Docling in the worker environment, enqueue via `/agent/sources/{id}/approve {"ingest": true}`, confirm chunks land with the expected `document_id`, then re-ask the question and check the citation is a chunk, not a `W#`.
-3. **Move to Qwen3-8B-AWQ** when GPU headroom allows (pin `4da05a8…`): set `INFERENCE_MODEL`, restart vLLM with the same flags, run `scripts/eval_agent.py --probe --tag 8b` and compare with `run6`. Expect better tool calling and spec quality.
-4. **Durable checkpoints + real `interrupt()` approval** (LangGraph SQLite/Postgres saver) so a run can resume after the user approves.
-5. **Configure and test a search provider** (`WEB_SEARCH_PROVIDER=searxng` is the self-hosted option), then add a live web case to `agent_eval.jsonl`.
-6. **A better validator:** an entailment judge (stronger model) behind the existing `Services.entailment` hook; RAGAS faithfulness once a judge is available. Grow `agent_eval.jsonl` from 9 to 50+ labelled cases and calibrate the 0.55 retrieval threshold on them.
-7. **Streaming** for `/agent/chat` (reuse the `emit` pattern from `/chat/stream`), per-user budgets/rate limits for web, image and artifact tools, and a metrics exporter.
-8. Housekeeping: untrack uploads/DBs from git (see §10), consolidate the `enable_thinking` mapping, schedule `scripts/agent_maintenance.py`, and commit.
+Done since the first version of this list: document ownership, durable checkpoints with `interrupt()` approval, streaming, the entailment-judge wiring, and the `enable_thinking` consolidation. Still open:
+
+1. **Run the real web-source ingestion once** against a scratch index (the worker image now exists and ingests PDFs; HTML ingestion of an approved page, instead of rendering it to PDF, is also possible with the new HTML support), then check the citation is a chunk, not a `W#`.
+2. **Move to Qwen3-8B-AWQ** when GPU headroom allows (pin `4da05a8...`): set `INFERENCE_MODEL`, restart vLLM with the same flags, run `scripts/eval_agent.py --probe --tag 8b` and compare with `run6`.
+3. **Configure and test a search provider** (`WEB_SEARCH_PROVIDER=searxng`), then add a live web case to `agent_eval.jsonl`.
+4. **Measure the judge and calibrate:** run the entailment judge on a stronger model, grow `agent_eval.jsonl` from 9 to 50+ labelled cases and calibrate the 0.55 retrieval threshold on them.
+5. Per-user budgets/rate limits for web, image and artifact tools, and a metrics exporter for the agent path.
+6. Housekeeping: schedule `scripts/agent_maintenance.py` (units are in `deploy/maintenance/`), commit, and untrack any runtime data still in git history (`docs/HISTORY_PURGE.md`).

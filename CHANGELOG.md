@@ -7,6 +7,20 @@ Newest entry first. Iterations 4 and 5 touch the ingestion pipeline, the stores,
 
 ---
 
+## Iteration 7: memory, formats, unified request path, images, auth (2026-11-07)
+
+Merged from four parallel branches; every claim below was checked by the test suites (542 app tests, 172 framework tests, ruff, mypy) unless marked not verified.
+
+- **Request path:** `/chat`, `/chat/stream`, `/agent/chat`, `/agent/chat/stream` (new, SSE) and resume run as Draco workloads with one execution id, policy, budget, tracing and `Idempotency-Key`. The two loops still have separate control flow (a full merge would change the `/chat` contract).
+- **Citation validation:** optional LLM entailment judge (`AGENT_ENTAILMENT_JUDGE`, off by default). `looks_injected` now has one copy (`draco.tools.safety`).
+- **Memory and context:** `MEMORY_BACKEND=hybrid` (Qdrant + OpenSearch with RRF, user-scoped), `/memory` routes, rolling conversation summaries (`INFERENCE_SUMMARY_ENABLED`, also used by the agent), contextual chunk headers (default on, need `scripts/reindex.py` for existing documents), rule-based query rewriting (`QUERY_REWRITE_MODE`). **Not measured:** no re-index or eval was run, so the hit@5 effect is unconfirmed.
+- **Ingestion:** `.md`, `.txt`, `.html`, `.docx` besides PDF, each with size limits (DOCX has a zip-bomb guard); the upload route accepts and signature-checks them. `PDF_JOB_TIMEOUT_S` is now `INGEST_JOB_TIMEOUT_S` (the old name still works). **Not verified:** Docling conversion of HTML and DOCX.
+- **Auth and ops:** API keys with scopes and expiry plus the `rag.audit` log; retention for conversations and agent state in `scripts/agent_maintenance.py` with systemd and compose scheduling (`deploy/maintenance/`).
+- **Images and CI:** the API and worker images build (CPU torch) and one PDF was ingested end to end through the worker into throwaway Qdrant and OpenSearch. `requirements.txt` is installable again (pillow 12.3.0, `uvicorn[standard]` added). CI gained a Docker-image job and a Python 3.11/3.12 matrix; **neither has run on GitHub**.
+- **Behaviour changes:** malformed `APP_API_KEYS` entries now fail at boot; a user id containing `:` is no longer accepted; the app's agent tools need an explicit tool policy under Draco.
+
+---
+
 ## Iteration 6: Durable LangGraph execution (2026-11-01)
 
 - Added a SQLite-backed checkpointer for agent graph state, pending task writes, integrity checks, expiry cleanup and cross-process recovery.

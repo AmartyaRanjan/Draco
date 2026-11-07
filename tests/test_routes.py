@@ -7,12 +7,10 @@ from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
-from fastapi import HTTPException, UploadFile
-from rq.exceptions import DuplicateJobError
-
 from app.api import routes
 from app.db import registry
-
+from fastapi import HTTPException, UploadFile
+from rq.exceptions import DuplicateJobError
 
 PDF = b"%PDF-1.7\n"  # uploads are sniffed for the PDF header
 
@@ -118,12 +116,36 @@ class UploadRouteTests(unittest.TestCase):
         self.assertEqual(len(self.stored_files()), 1)
         self.assertEqual(registry.get_ingestion_outbox(document["document_id"])["state"], "queued")
 
-    def test_non_pdf_is_rejected_before_queueing(self):
-        for name, data in (("notes.txt", PDF + b"x"), ("fake.pdf", b"MZ\x90\x00 not a pdf")):
+    def test_unsupported_or_mislabelled_files_are_rejected_before_queueing(self):
+        for name, data in (
+            ("sheet.xlsx", b"PK\x03\x04 anything"),
+            ("fake.pdf", b"MZ\x90\x00 not a pdf"),
+            ("fake.docx", b"%PDF-1.4 not a docx"),
+            ("binary.txt", b"hello\x00world"),
+            ("binary.md", b"# title\x00"),
+        ):
             with self.assertRaises(HTTPException) as ctx:
-                asyncio.run(routes.upload_document(UploadFile(file=io.BytesIO(data), filename=name)))
+                asyncio.run(routes.upload_document(UploadFile(file=io.BytesIO(data), filename=name), "alice"))
             self.assertEqual(ctx.exception.status_code, 415)
         self.assertEqual(self.queue.enqueue_calls, 0)
+        self.assertEqual(self.stored_files(), [])
+
+    def test_text_markdown_html_and_docx_are_accepted(self):
+        for name, data in (
+            ("notes.txt", b"plain notes"),
+            ("readme.md", b"# Title\n\ntext"),
+            ("page.html", b"<html><body>hi</body></html>"),
+            ("memo.docx", b"PK\x03\x04" + b"\x00" * 20),
+        ):
+            response = asyncio.run(routes.upload_document(UploadFile(file=io.BytesIO(data), filename=name), "alice"))
+            self.assertEqual(response["status"], "queued", name)
+            self.assertEqual(response["filename"], name)
+
+    def test_per_format_size_cap(self):
+        with patch.object(routes.formats, "MAX_TEXT_BYTES", 16):
+            with self.assertRaises(HTTPException) as ctx:
+                asyncio.run(routes.upload_document(UploadFile(file=io.BytesIO(b"a" * 64), filename="big.txt"), "alice"))
+        self.assertEqual(ctx.exception.status_code, 413)
         self.assertEqual(self.stored_files(), [])
 
     def test_pages_endpoint(self):

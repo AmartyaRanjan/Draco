@@ -9,13 +9,10 @@ WORKDIR /srv
 ARG TORCH_INDEX_URL=""
 COPY requirements.txt .
 # Optional: take torch from another index (e.g. the CPU wheel index) before resolving the rest, so pip keeps that build.
-# Docling (PDF conversion) is left out: the API never converts documents, the worker image does (and docling 2.137 also
-# conflicts with the pillow pin in requirements.txt; the worker image resolves that).
+# Docling (PDF conversion) is left out: the API never converts documents, the worker image does.
 RUN if [ -n "$TORCH_INDEX_URL" ]; then pip install --index-url "$TORCH_INDEX_URL" "$(grep -E '^torch==' requirements.txt)"; fi \
  && grep -v -E '^docling==' requirements.txt > /tmp/requirements-api.txt \
  && pip install -r /tmp/requirements-api.txt && rm /tmp/requirements-api.txt
-# The ASGI server is not in requirements.txt; pinned to the version the app is developed against.
-RUN pip install "uvicorn[standard]==0.54.0"
 # The framework package. The app imports draco.* (e.g. draco.tools.safety); install it as a regular (non-editable) package.
 COPY pyproject.toml README.md ./
 COPY src ./src

@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.agent import router as agent_router
 from app.api.chat import router as chat_router
 from app.api.health import router as health_router
+from app.api.memory import router as memory_router
 from app.api.query import router as query_router
 from app.api.routes import router
 from app.core.auth import get_api_keys, require_scope
@@ -70,4 +71,5 @@ app.include_router(health_router)
 app.include_router(router, dependencies=[Depends(require_scope("read", {"POST": "upload"}))])  # /documents
 app.include_router(query_router, dependencies=[Depends(require_scope("read"))])
 app.include_router(chat_router, dependencies=[Depends(require_scope("chat"))])
+app.include_router(memory_router, dependencies=[Depends(require_scope("chat"))])
 app.include_router(agent_router, dependencies=[Depends(require_scope("agent"))])
