@@ -1,5 +1,12 @@
 # Draco: an execution harness for RAG and agent systems, with a production-oriented starter app
 
+[![CI](https://github.com/AmartyaRanjan/Draco/actions/workflows/ci.yml/badge.svg)](https://github.com/AmartyaRanjan/Draco/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
+![Status: alpha](https://img.shields.io/badge/status-alpha-orange)
+
+[Documentation](docs/README.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Roadmap](docs/architecture/roadmap.md) · [Changelog](docs/DRACO_CHANGELOG.md)
+
 Draco has two layers:
 
 - **`src/draco/`: the framework.** A small Python package (hard dependency: `pydantic`) that runs any async workload under one lifecycle: trusted identity and role-based authorization, default-deny tool policy, budgets and rate limits, deadlines and cancellation, idempotency, tracing with redaction, and durable state (in-memory, SQLite or PostgreSQL, with retention and optional encryption at rest). It adds an agent registry and router, a guarded tool runtime (native tools, optional MCP), resumable steps, and adapters for LangGraph and for OpenAI-compatible and Anthropic model providers.
@@ -240,6 +247,12 @@ Dataset, metrics, baselines and reproducibility instructions: [evals.md](evals.m
 
 Planned work, separated from what is implemented: [docs/architecture/roadmap.md](docs/architecture/roadmap.md). Priorities: re-index a real corpus and re-run the evals, run the new CI jobs, finish merging the two chat flows, a shared rate limiter, and a real authentication provider.
 
-## Contributing and License
+## Contributing, security and license
 
-Development setup: `pip install -e ".[dev]"`, then run both test suites (`pytest tests/draco` and `python -m unittest discover -s tests -t .`); ruff and mypy are configured in `pyproject.toml`. Project structure and design principles: [docs/PROJECT_OVERVIEW.md](docs/PROJECT_OVERVIEW.md); implementation log and verification matrix: [docs/IMPLEMENTATION_LOG.md](docs/IMPLEMENTATION_LOG.md).
+Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md): setup, the checks CI runs, code and test standards, and how to open a pull request. Questions and ideas go to [Discussions](https://github.com/AmartyaRanjan/Draco/discussions); see [SUPPORT.md](SUPPORT.md). Please read the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+Found a vulnerability? Do not open a public issue. Follow [SECURITY.md](SECURITY.md).
+
+Quick development loop: `pip install -e ".[dev,providers]"`, then `pytest tests/draco`, `ruff check src tests/draco examples` and `mypy src/draco`; add `python -m unittest discover -s tests -t .` if you changed `app/`. Project structure and design principles: [docs/PROJECT_OVERVIEW.md](docs/PROJECT_OVERVIEW.md). Implementation log and verification matrix: [docs/IMPLEMENTATION_LOG.md](docs/IMPLEMENTATION_LOG.md). Every document is indexed in [docs/README.md](docs/README.md).
+
+Draco is released under the [MIT License](LICENSE).
