@@ -14,7 +14,7 @@ RUN if [ -n "$TORCH_INDEX_URL" ]; then pip install --index-url "$TORCH_INDEX_URL
  && grep -v -E '^docling==' requirements.txt > /tmp/requirements-api.txt \
  && pip install -r /tmp/requirements-api.txt && rm /tmp/requirements-api.txt
 # The framework package. The app imports draco.* (e.g. draco.tools.safety); install it as a regular (non-editable) package.
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md LICENSE ./
 COPY src ./src
 RUN pip install --no-deps . && rm -rf src build && python -c "import draco, draco.tools.safety"
 COPY app ./app
