@@ -6,18 +6,24 @@
 # ends the worker, RQ marks the job failed, and the outbox attempt cap stops
 # the retry loop — see MAX_INGESTION_ATTEMPTS in app/db/registry.py).
 #
-# Reuses the API image (requirements.txt already contains Docling and torch).
+# Image: deploy/worker/Dockerfile (Docling + torch + the app + draco). The API
+# image does not contain Docling. Add
+#   --build-arg TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
+# (or set it under build.args) for a CPU-only image.
 # Mounts the same storage volume the API uses: the SQLite registry, the outbox,
 # and app/storage/uploads must be shared between the two containers
-# (single-host trust domain; see production.md §6).
+# (single-host trust domain; see production.md §6). Model downloads (Docling
+# layout/OCR models, BGE-M3) are cached in the hf_cache volume.
 #
-# Not built or run in the session that wrote it (no Docker daemon), like the
-# API Dockerfile. Verify before production use.
+#   cd deploy/worker && REDIS_URL=redis://localhost:6379/0 docker compose up -d --build
 services:
   ingestion-worker:
     build:
       context: ../..
-      dockerfile: Dockerfile
+      dockerfile: deploy/worker/Dockerfile
+      args:
+        TORCH_INDEX_URL: ${TORCH_INDEX_URL:-}
+    image: ${RAG_WORKER_IMAGE:-rag-worker:latest}
     container_name: rag-ingestion-worker
     command: rqworker ingestion --url ${REDIS_URL:?set REDIS_URL}
     environment:
@@ -27,9 +33,11 @@ services:
       # network if the backends are containers too.
       OPENSEARCH_URL: ${OPENSEARCH_URL:-http://localhost:9200}
       QDRANT_URL: ${QDRANT_URL:-http://localhost:6333}
+      EMBEDDING_DEVICE: ${EMBEDDING_DEVICE:-cpu}
     network_mode: host
     volumes:
       - draco_storage:/srv/app/storage
+      - hf_cache:/srv/.cache/huggingface
     # Hard ceilings for untrusted-document processing.
     mem_limit: ${WORKER_MEM_LIMIT:-4g}
     memswap_limit: ${WORKER_MEM_LIMIT:-4g}   # no hidden swap slack
@@ -39,3 +47,4 @@ services:
 
 volumes:
   draco_storage:
+  hf_cache:

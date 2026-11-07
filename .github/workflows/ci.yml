@@ -24,11 +24,17 @@ jobs:
 
   draco-core:
     # Proves the framework installs and runs without torch/qdrant/langgraph: only pydantic + httpx.
+    # pyproject declares requires-python >=3.11, so the lowest supported versions are tested too.
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.14"]
+    name: draco-core (py${{ matrix.python-version }})
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: {python-version: "3.14"}
+        with: {python-version: "${{ matrix.python-version }}"}
       - name: Install draco with dev tools only
         run: |
           python -m pip install --upgrade pip
@@ -55,3 +61,39 @@ jobs:
           python -m pip uninstall --yes draco
           pip-audit --skip-editable --strict --desc
           pip-audit -r requirements.txt --no-deps --disable-pip --desc
+
+  docker-images:
+    # Builds the API and ingestion-worker images (CPU torch to keep the runner's disk in budget). Nothing is pushed.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Free runner disk (torch + docling layers are several GB)
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc && df -h /
+      - uses: docker/setup-buildx-action@v3
+      - name: Build API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: false
+          load: true
+          tags: rag-api:ci
+          build-args: TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
+      - name: API image imports the app and draco, and answers /health
+        run: |
+          docker run --rm --entrypoint python rag-api:ci -c "import draco.tools.safety, app.main"
+          docker run -d --name api -p 127.0.0.1:18000:8000 -e APP_AUTH_DISABLED=true -e RATE_LIMIT_ENABLED=false rag-api:ci
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:18000/health && break; sleep 2; done
+          curl -fsS http://127.0.0.1:18000/health
+          docker rm -f api
+      - name: Build worker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/worker/Dockerfile
+          push: false
+          load: true
+          tags: rag-worker:ci
+          build-args: TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
+      - name: Worker image imports the ingestion stack
+        run: docker run --rm --entrypoint python rag-worker:ci -c "import docling, rq, app.ingestion.worker, app.ingestion.convert"

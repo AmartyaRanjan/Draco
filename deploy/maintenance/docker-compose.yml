@@ -1,0 +1,44 @@
+# Retention job as a long-running container (example for compose-only hosts). It runs
+# scripts/agent_maintenance.py immediately and then every MAINTENANCE_INTERVAL_S (default daily).
+# Prefer the systemd timer (rag-maintenance.{service,timer}) or an orchestrator CronJob where available.
+#
+#   docker build -t rag-api .                                   # from the repository root
+#   cd deploy/maintenance && DRACO_STORAGE_VOLUME=<api storage volume> docker compose up -d
+#   docker compose run --rm maintenance python scripts/agent_maintenance.py --dry-run    # preview, deletes nothing
+#
+# The job must see the same SQLite files the API writes (conversations.db, agent.db, agent-checkpoints.db,
+# artifacts), so it mounts the API's storage volume. Set DRACO_STORAGE_VOLUME to that volume's real name
+# (`docker volume ls`; compose prefixes volume names with the project name).
+services:
+  maintenance:
+    image: ${RAG_API_IMAGE:-rag-api:latest}
+    container_name: rag-maintenance
+    env_file:
+      - path: ../../.env
+        required: false
+    environment:
+      CONVERSATION_RETENTION_DAYS: ${CONVERSATION_RETENTION_DAYS:-90}
+      AGENT_STATE_RETENTION_DAYS: ${AGENT_STATE_RETENTION_DAYS:-30}
+      MAINTENANCE_INTERVAL_S: ${MAINTENANCE_INTERVAL_S:-86400}
+    # A failed run exits non-zero with its JSON report on stdout; the loop logs it and tries again next interval.
+    command:
+      - sh
+      - -c
+      - |
+        while true; do
+          python scripts/agent_maintenance.py || echo '{"maintenance":"run failed, see report above"}'
+          sleep "$${MAINTENANCE_INTERVAL_S}"
+        done
+    volumes:
+      - storage:/srv/app/storage
+    network_mode: none          # touches only local SQLite files and artifact storage
+    read_only: true
+    tmpfs: [/tmp]
+    mem_limit: 512m
+    cpus: 0.5
+    restart: unless-stopped
+
+volumes:
+  storage:
+    external: true
+    name: ${DRACO_STORAGE_VOLUME:-draco_storage}

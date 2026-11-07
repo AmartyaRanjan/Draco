@@ -54,17 +54,15 @@ class InferenceSettings:
         if self.agent_max_steps < 1 or self.agent_max_tool_calls < 0 or self.max_retries < 0:
             raise ValueError("Agent/retry limits must be non-negative (steps >= 1).")
         if not self.auth_disabled and not self.api_keys:
-            raise ValueError("Set APP_API_KEYS ('key:user,...') or APP_AUTH_DISABLED=true (development only).")
+            raise ValueError("Set APP_API_KEYS ('key:user[:scopes][:expires=YYYY-MM-DD],...') or APP_AUTH_DISABLED=true (development only).")
         return self
 
 
 def _keys(raw: str) -> dict:
-    out = {}
-    for part in filter(None, (p.strip() for p in raw.split(","))):
-        key, _, user = part.partition(":")
-        if key and user:
-            out[key] = user
-    return out
+    """key -> user. Entries may also carry scopes and an expiry (`key:user[:scopes][:expires=YYYY-MM-DD]`); those are
+    parsed and enforced by app.core.auth (route scope guard). Malformed entries raise at boot."""
+    from app.core.auth import parse_api_keys
+    return {key: grant.user for key, grant in parse_api_keys(raw).items()}
 
 
 @lru_cache
