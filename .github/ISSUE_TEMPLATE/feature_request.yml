@@ -1,0 +1,49 @@
+name: Feature request
+description: Propose a new capability or an extension point
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For open-ended questions or early ideas, start a [discussion](https://github.com/AmartyaRanjan/Draco/discussions). Check the [roadmap](https://github.com/AmartyaRanjan/Draco/blob/main/docs/architecture/roadmap.md) first: it may already be planned.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do, and what stops you? Describe the need, not only the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What would you like Draco to do? Sketch the API or behaviour if you can.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches, or how you work around it today.
+  - type: dropdown
+    id: layer
+    attributes:
+      label: Where does it belong?
+      description: Reusable behaviour goes in the framework; behaviour specific to the bundled RAG service goes in the starter app.
+      options:
+        - Framework (src/draco)
+        - Starter app (app/)
+        - Both / not sure
+        - Documentation
+    validations:
+      required: true
+  - type: checkboxes
+    id: impact
+    attributes:
+      label: Considerations
+      options:
+        - label: This would change a public API or existing behaviour.
+        - label: This touches authorization, tenant isolation or tool policy.
+        - label: This needs a new third-party dependency.
+        - label: I am willing to work on this.

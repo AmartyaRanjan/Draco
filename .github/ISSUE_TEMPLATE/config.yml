@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or idea
+    url: https://github.com/AmartyaRanjan/Draco/discussions
+    about: Ask how to use Draco or discuss a design. Issues are for bugs and concrete feature requests.
+  - name: Report a security vulnerability
+    url: https://github.com/AmartyaRanjan/Draco/blob/main/SECURITY.md
+    about: Do not open a public issue for a vulnerability. Read the security policy first.
+  - name: Documentation index
+    url: https://github.com/AmartyaRanjan/Draco/blob/main/docs/README.md
+    about: Most questions are answered in the docs.

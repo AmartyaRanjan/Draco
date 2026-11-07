@@ -1,0 +1,31 @@
+version: 2
+updates:
+  # requirements.txt (the starter app's pins) and pyproject.toml (framework extras)
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      python-minor-and-patch:
+        update-types: ["minor", "patch"]
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "ci"
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "chore(docker)"
+  - package-ecosystem: "docker"
+    directory: "/deploy/worker"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "chore(docker)"
