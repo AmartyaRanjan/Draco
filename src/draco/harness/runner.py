@@ -25,14 +25,16 @@ from draco.core.identity import Identity
 from draco.core.policy import Policy
 from draco.core.protocols import Workload
 from draco.core.results import ErrorInfo, ExecutionResult, Handoff, Status, Usage, Waiting, status_for
+from draco.harness.persistence import open_store
 from draco.observability.redaction import Redactor
 from draco.observability.trace import Exporter, JsonlExporter, Tracer
 from draco.plugins.registry import PluginHost
 from draco.plugins.services import ServiceRegistry
 from draco.policies.guardrails import Guardrail, run_guardrails
+from draco.policies.ratelimit import InMemoryRateLimiter, RateLimiter, limits_from_settings
 from draco.security.audit import authorize
 from draco.security.authorization import Authorizer, Resource, RoleAuthorizer
-from draco.state.memory import InMemoryStore
+from draco.security.secrets import SecretProvider
 from draco.state.stores import ExecutionRecord
 
 logger = logging.getLogger("draco.harness")
@@ -51,12 +53,17 @@ class WorkloadSpec:
 class Harness:
     def __init__(self, settings: DracoSettings | None = None, *, store: Any = None,
                  host: PluginHost | None = None, exporters: list[Exporter] | None = None,
-                 strict_persistence: bool = False, authorizer: Authorizer | None = None):
+                 strict_persistence: bool = False, authorizer: Authorizer | None = None,
+                 rate_limiter: RateLimiter | None = None, secrets: SecretProvider | None = None):
+        """Without `store`, the store comes from settings (`state_url`, `state_path`, else in memory), with
+        payload encryption when `state_encryption_key` names a secret in `secrets` (default: environment).
+        `rate_limiter` enforces `tenant_rate_per_minute`/`user_rate_per_minute`; the default is a per-process
+        `InMemoryRateLimiter` (supply a shared implementation when several processes serve one tenant)."""
         self.settings = settings or DracoSettings()
         self.host = host or PluginHost()
         self.services: ServiceRegistry = self.host.services
         self.bus: EventBus = self.host.bus
-        self.store = store or InMemoryStore()
+        self.store = store if store is not None else open_store(self.settings, secrets)
         self.strict_persistence = strict_persistence
         if exporters is None and self.settings.trace_path:
             exporters = [JsonlExporter(self.settings.trace_path)]
@@ -73,6 +80,9 @@ class Harness:
         self._sem = asyncio.Semaphore(self.settings.max_concurrency)
         self._warned_unauthenticated = False
         self._tenant_inflight: dict[str, int] = {}
+        self._tenant_rate, self._user_rate = limits_from_settings(self.settings)
+        self.rate_limiter: RateLimiter | None = rate_limiter or (
+            InMemoryRateLimiter() if self._tenant_rate or self._user_rate else None)
         self._input_guards: list[Guardrail] = []
         self._output_guards: list[Guardrail] = []
 
@@ -249,6 +259,8 @@ class Harness:
                     prev.idempotency_key = None  # superseded by this attempt
                     await self.store.save_execution(prev)
                     rec.attempts = prev.attempts + 1
+            if is_root and self.rate_limiter is not None:
+                await self._check_rate(ctx)
             cap = self.settings.max_concurrency_per_tenant
             if is_root and cap and ctx.tenant_id is not None:
                 if self._tenant_inflight.get(ctx.tenant_id, 0) >= cap:  # reject, don't queue: one tenant cannot fill the queue
@@ -299,6 +311,25 @@ class Harness:
                     del self._tenant_inflight[tenant_held]
         await self._finalize(ctx, res, rec, usage0, started, target)
         return res
+
+    async def _check_rate(self, ctx: ExecutionContext) -> None:
+        """Admit one root execution against the tenant and (tenant, user) token buckets; reject, don't queue."""
+        limiter = self.rate_limiter
+        if limiter is None:
+            return
+        checks = []
+        if self._tenant_rate is not None and ctx.tenant_id is not None:
+            checks.append(("tenant_rate", f"tenant\x1f{ctx.tenant_id}", self._tenant_rate))
+        if self._user_rate is not None and ctx.user_id is not None:
+            checks.append(("user_rate", f"user\x1f{ctx.tenant_id or '-'}\x1f{ctx.user_id}", self._user_rate))
+        for resource, key, limit in checks:
+            wait = await limiter.acquire(key, limit)
+            if wait > 0:
+                exc = BudgetExhausted(resource, limit.per_minute,
+                                      f"{resource} limit exceeded ({limit.per_minute:g}/min, burst {limit.burst})")
+                exc.retryable = True
+                exc.details["retry_after_s"] = round(wait, 3)
+                raise exc
 
     async def _run_workload(self, ctx: ExecutionContext, spec: WorkloadSpec, input: Any) -> Any:
         async def body() -> Any:

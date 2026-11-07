@@ -67,8 +67,9 @@ def test_framework_imports_without_app_or_heavy_deps():
     code = (
         f"import sys; sys.path[:0] = {paths!r}; import draco.core, draco.plugins, draco.policies, draco.harness, "
         "draco.observability, draco.state, draco.agents, draco.tools, draco.security, draco.adapters.retrieval, draco.adapters.model_provider\n"
+        "import draco.state.postgres, draco.security.crypto, draco.policies.ratelimit, draco.state.retention\n"
         "import draco.adapters.langgraph_checkpoint\n"
-        "bad = [m for m in ('app', 'torch', 'langgraph', 'sentence_transformers', 'qdrant_client', 'httpx') if m in sys.modules]\n"
+        "bad = [m for m in ('app', 'torch', 'langgraph', 'sentence_transformers', 'qdrant_client', 'httpx', 'psycopg', 'cryptography') if m in sys.modules]\n"
         "assert not bad, bad"
     )
     r = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, text=True, cwd=root)
