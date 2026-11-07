@@ -1,13 +1,24 @@
 
+import logging
 import os
 
 from opensearchpy import OpenSearch
 from opensearchpy.helpers import bulk
 
+logger = logging.getLogger(__name__)
 
 INDEX_NAME = os.getenv("OPENSEARCH_INDEX", "rag_chunks")
 
+# Contextual chunk headers (app.ingestion.headers): `search_text` = header + text is what BM25
+# matches; `text` stays the displayed/cited text. Indexes created before these fields existed
+# get them added once per process (adding a field to a mapping is non-destructive).
+CONTEXT_FIELDS = {
+    "search_text": {"type": "text"},
+    "context_header": {"type": "text"},
+}
+
 _client = None
+_context_fields_ready = False
 
 
 def get_opensearch_client() -> OpenSearch:
@@ -52,9 +63,18 @@ def get_opensearch_client() -> OpenSearch:
 
 def ensure_index() -> None:
     """Create the BM25 index with explicit field mappings."""
+    global _context_fields_ready
     client = get_opensearch_client()
 
     if client.indices.exists(index=INDEX_NAME):
+        if not _context_fields_ready:
+            try:
+                client.indices.put_mapping(index=INDEX_NAME, body={"properties": CONTEXT_FIELDS})
+            except Exception as exc:
+                # A field already mapped dynamically by an older write cannot be re-declared;
+                # it still holds text, so indexing proceeds.
+                logger.warning("opensearch_context_mapping_skipped: %s", type(exc).__name__)
+            _context_fields_ready = True
         return
 
     client.indices.create(
@@ -70,6 +90,7 @@ def ensure_index() -> None:
                     "page_end": {"type": "integer"},
                     "text": {"type": "text"},
                     "section_path": {"type": "text"},
+                    **CONTEXT_FIELDS,
                 }
             }
         },

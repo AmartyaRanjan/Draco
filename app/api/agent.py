@@ -1,10 +1,15 @@
 """HTTP surface of the agent layer. Approval/reject/ingest are the human-in-the-loop step: they are
-authenticated API calls that write the approval record; no model-callable capability can."""
+authenticated API calls that write the approval record; no model-callable capability can.
+
+`/agent/chat`, `/agent/chat/stream` and `/agent/executions/{id}/resume` run as Draco workloads
+(`app.agent.harness`), with the same identity, policy, budget, deadline, cancellation, idempotency and
+tracing as `/chat`."""
 
 import logging
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from draco.core.results import Status
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -12,10 +17,11 @@ from app.agent import artifacts as A
 from app.agent.catalog import build_registry
 from app.agent.evidence import EvidenceStore
 from app.agent.graph import AgentRunner
+from app.agent.harness import AGENT, AGENT_RESUME, agent_policy, run_workload
 from app.agent.registry import CapabilityContext
 from app.agent.schemas import AgentChatRequest, AgentChatResponse
 from app.core import concurrency
-from app.api.chat import heavy_user, read_user
+from app.api.chat import IdempotencyKey, heavy_user, read_user, result_output, sse_response, stream_error
 from app.inference.config import get_inference_settings
 from app.inference.memory import SqliteConversationStore
 from app.inference.schemas import InferenceError
@@ -66,20 +72,63 @@ async def _cap(runner: AgentRunner, name: str, args: dict, user: str):
     return res
 
 
+async def _run_agent(req: AgentChatRequest, user: str, runner: AgentRunner, emit=None, key: str | None = None):
+    return await run_workload(AGENT, req.model_dump(mode="json"), user,
+                              policy=agent_policy(runner.reg, allow_web=req.allow_web), impl_key="runner",
+                              impl=runner, emit=emit, idempotency_key=key, session_id=req.conversation_id)
+
+
 @router.post("/chat")
 async def agent_chat(
-    req: AgentChatRequest, user: str = Depends(heavy_user), runner: AgentRunner = Depends(get_runner)
+    req: AgentChatRequest,
+    user: str = Depends(heavy_user),
+    runner: AgentRunner = Depends(get_runner),
+    idempotency_key: str | None = IdempotencyKey,
 ):
     try:
         async with concurrency.llm_slot():
-            return (await runner.run(req, user, tenant_id=user)).model_dump()
+            res = await _run_agent(req, user, runner, key=idempotency_key)
     except HTTPException:
         raise
-    except InferenceError as exc:
-        raise HTTPException(exc.status_code, f"{exc} ({exc.code})") from exc
     except Exception as exc:
         logger.exception("agent_chat_unexpected")
         raise HTTPException(500, "Internal error while answering") from exc
+    return result_output(res)
+
+
+@router.post("/chat/stream")
+async def agent_chat_stream(
+    req: AgentChatRequest,
+    request: Request,
+    user: str = Depends(heavy_user),
+    runner: AgentRunner = Depends(get_runner),
+    idempotency_key: str | None = IdempotencyKey,
+):
+    """SSE events: start | step | tool_call | tool_result | token | revision, then exactly one terminal
+    event: done (`response`), awaiting_approval (`execution_id`, `pending_approvals`, `response`; resume
+    with POST /agent/executions/{id}/resume) or error. Tokens are streamed for the final answer of
+    question-answering runs only; `revision` means the streamed text is being replaced, and the terminal
+    `response` (validated, citations resolved) always supersedes streamed text."""
+    await concurrency.acquire_llm_slot()  # 503 now, before the stream starts, if the model is saturated
+
+    async def work(emit):
+        res = await _run_agent(req, user, runner, emit, idempotency_key)
+        body = None
+        try:
+            body = result_output(res)
+        except HTTPException:
+            await emit(stream_error(res))
+            return
+        if res.replayed:
+            await emit({"event": "start", "request_id": res.execution_id, "replayed": True,
+                        "conversation_id": (body.get("metadata") or {}).get("conversation_id")})
+        if res.status == Status.waiting:
+            await emit({"event": "awaiting_approval", "execution_id": res.execution_id,
+                        "pending_approvals": body.get("pending_approvals", []), "response": body})
+        else:
+            await emit({"event": "done", "response": body})
+
+    return sse_response(work, request)
 
 
 @router.get("/capabilities")
@@ -246,11 +295,12 @@ async def resume_execution(
     user: str = Depends(heavy_user),
     runner: AgentRunner = Depends(get_runner),
 ) -> AgentChatResponse:
-    """Submit a validated approval decision and resume the interrupted execution."""
+    """Submit a validated approval decision and resume the interrupted execution (Draco workload
+    `app.agent.resume`; ownership is checked against the authenticated principal before the graph runs)."""
     try:
-        return (await runner.resume(execution_id, body.decision, user, tenant_id=user)).model_dump()
-    except InferenceError as exc:
-        raise HTTPException(exc.status_code, f"{exc} ({exc.code})") from exc
+        res = await run_workload(AGENT_RESUME, {"execution_id": execution_id, "decision": body.decision}, user,
+                                 policy=agent_policy(runner.reg), impl_key="runner", impl=runner)
     except Exception as exc:
         logger.exception("agent_resume_unexpected")
         raise HTTPException(500, "Internal error while resuming execution") from exc
+    return result_output(res)

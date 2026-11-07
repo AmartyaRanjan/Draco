@@ -61,6 +61,11 @@ class AgentSettings:
     # file analysis
     analysis_max_bytes: int
     checkpoint_path: str = ""
+    # citation validation: optional LLM entailment judge (off by default; lexical checks always run)
+    entailment_judge: bool = False
+    entailment_timeout_s: float = 8.0
+    entailment_max_claims: int = 8  # judged sentences per answer; the rest keep the lexical verdict
+    entailment_max_source_chars: int = 6000
 
     def validate(self, *, production: bool = False) -> "AgentSettings":
         if not 0.3 <= self.evidence_compaction_ratio <= 1.0:
@@ -73,6 +78,10 @@ class AgentSettings:
             raise ValueError("AGENT_MAX_MODE_CHANGES must be >= 0.")
         if self.summary_target_tokens < 64 or self.summary_batch_tokens < 256:
             raise ValueError("Summary budgets too small.")
+        if not 0 < self.entailment_timeout_s <= 60:
+            raise ValueError("AGENT_ENTAILMENT_TIMEOUT_S must be in (0, 60].")
+        if self.entailment_max_claims < 1 or self.entailment_max_source_chars < 500:
+            raise ValueError("AGENT_ENTAILMENT_MAX_CLAIMS must be >= 1 and AGENT_ENTAILMENT_MAX_SOURCE_CHARS >= 500.")
         if production and self.web_allow_private_hosts:
             raise ValueError("WEB_ALLOW_PRIVATE_HOSTS=true is not allowed in production.")
         return self
@@ -114,4 +123,8 @@ def get_agent_settings() -> AgentSettings:
         image_model=os.getenv("IMAGE_MODEL") or None,
         analysis_max_bytes=_i("ANALYSIS_MAX_BYTES", 20 * 1024 * 1024),
         checkpoint_path=os.getenv("AGENT_CHECKPOINT_PATH") or str(_STORAGE / "agent-checkpoints.db"),
+        entailment_judge=_b("AGENT_ENTAILMENT_JUDGE", "false"),
+        entailment_timeout_s=_f("AGENT_ENTAILMENT_TIMEOUT_S", 8),
+        entailment_max_claims=_i("AGENT_ENTAILMENT_MAX_CLAIMS", 8),
+        entailment_max_source_chars=_i("AGENT_ENTAILMENT_MAX_SOURCE_CHARS", 6000),
     ).validate()

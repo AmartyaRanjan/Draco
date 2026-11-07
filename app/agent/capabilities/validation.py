@@ -62,6 +62,7 @@ class ValidateOut(BaseModel):
     uncited_sentences: list[str]
     coverage: dict
     method: str = "identifier_resolution + lexical_overlap"
+    judge: dict | None = None  # entailment judge usage when one is configured: judged / changed / errors
     note: str = "Checks that identifiers exist and cited text overlaps the claim; it does not prove the claim is true."
     summary: str = ""
 
@@ -83,6 +84,9 @@ async def validate_citations(a: ValidateIn, ctx):
     sents = split_answer(a.answer)[: a.max_sentences]
     invalid, checks, uncited = [], [], []
     existence_cache: dict[str, bool] = {}
+    judge = svc.entailment if svc is not None else None
+    judge_limit = getattr(getattr(svc, "settings", None), "entailment_max_claims", 8)
+    jstats = {"judged": 0, "changed": 0, "errors": 0, "skipped": 0}
     for s in sents:
         refs = list(dict.fromkeys(MARK.findall(s)))
         if not refs:
@@ -126,13 +130,11 @@ async def validate_citations(a: ValidateIn, ctx):
             best, overlap = best_sentence(MARK.sub("", s), texts)
             if overlap >= 0.5 and bool(_NEG.search(MARK.sub("", s))) != bool(_NEG.search(best)):
                 verdict, reason = "weak", "negation differs from the best-matching source sentence"
-        if svc is not None and svc.entailment is not None and verdict != "unsupported":
-            try:
-                lab = await svc.entailment(MARK.sub("", s), src)
-                if lab == "contradicted":
-                    verdict, reason = "unsupported", "validator model: contradicted"
-            except Exception:
-                pass
+        if judge is not None and verdict != "unsupported":
+            if jstats["judged"] + jstats["errors"] >= judge_limit:
+                jstats["skipped"] += 1
+            else:
+                verdict, reason = await _judge(judge, MARK.sub("", s), src, verdict, reason, jstats)
         checks.append(ClaimCheck(sentence=s[:300], refs=refs, verdict=verdict, support=round(support, 2), reason=reason))
     n_abst = sum(c.verdict == "abstention" for c in checks)
     n_cited = len(checks) - n_abst
@@ -144,8 +146,33 @@ async def validate_citations(a: ValidateIn, ctx):
            "supported": n_sup, "weak": sum(c.verdict == "weak" for c in checks),
            "unsupported": sum(c.verdict in ("unsupported", "invalid_reference") for c in checks)}
     status = "fail" if invalid or cov["unsupported"] else "warn" if cov["weak"] or uncited else "pass"
+    extra = {}
+    if judge is not None:
+        extra = {"judge": jstats, "method": "identifier_resolution + lexical_overlap + entailment_judge"}
     return ValidateOut(status=status, invalid_refs=invalid, claims=checks, uncited_sentences=uncited, coverage=cov,
-                       summary=f"{status}: {n_sup}/{n_cited} supported, {len(invalid)} invalid refs")
+                       summary=f"{status}: {n_sup}/{n_cited} supported, {len(invalid)} invalid refs", **extra)
+
+
+async def _judge(judge, claim: str, src: str, verdict: str, reason: str | None, stats: dict) -> tuple[str, str | None]:
+    """Refine a lexical verdict with the entailment judge. contradicted -> unsupported; neutral demotes a
+    lexical 'supported' to 'weak'; entailed promotes a purely lexical 'weak' (no number/negation reason) to
+    'supported'. Any judge failure keeps the lexical verdict."""
+    try:
+        label = await judge(claim, src)
+    except Exception:  # timeout, transport, unparseable output: fall back to the lexical verdict
+        stats["errors"] += 1
+        return verdict, reason
+    stats["judged"] += 1
+    new = verdict
+    if label == "contradicted":
+        new, reason = "unsupported", "validator model: contradicted"
+    elif label == "neutral" and verdict == "supported":
+        new, reason = "weak", "validator model: not entailed"
+    elif label == "entailed" and verdict == "weak" and reason is None:
+        new, reason = "supported", "validator model: entailed"
+    if new != verdict:
+        stats["changed"] += 1
+    return new, reason
 
 
 class FeedbackIn(BaseModel):

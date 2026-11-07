@@ -2,14 +2,16 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.agent import router as agent_router
 from app.api.chat import router as chat_router
 from app.api.health import router as health_router
+from app.api.memory import router as memory_router
 from app.api.query import router as query_router
 from app.api.routes import router
+from app.core.auth import get_api_keys, require_scope
 from app.core.http_settings import get_platform_settings
 from app.core.middleware import PlatformMiddleware
 from app.core.observability import configure_logging
@@ -26,6 +28,7 @@ async def lifespan(app: FastAPI):
     configure_logging(p.log_level, p.log_json)
     # Fail at boot, not on the first request: bad limits, missing API keys, unsafe production flags.
     p.validate(auth_disabled=get_inference_settings().auth_disabled)
+    get_api_keys()  # parse key scopes/expiry now so a malformed APP_API_KEYS fails the boot
     get_agent_settings().validate(production=p.production)
     init_db()
     from app.core.queue import ingestion_queue
@@ -63,8 +66,10 @@ if _cors:
                        expose_headers=["x-request-id", "retry-after", "x-ratelimit-limit", "x-ratelimit-remaining"])
 app.add_middleware(PlatformMiddleware)  # added last = outermost: it sees every request, including CORS preflights
 
+# Scope enforcement (app/core/auth.py). Router-level dependencies run before each route's own auth dependency.
 app.include_router(health_router)
-app.include_router(router)
-app.include_router(query_router)
-app.include_router(chat_router)
-app.include_router(agent_router)
+app.include_router(router, dependencies=[Depends(require_scope("read", {"POST": "upload"}))])  # /documents
+app.include_router(query_router, dependencies=[Depends(require_scope("read"))])
+app.include_router(chat_router, dependencies=[Depends(require_scope("chat"))])
+app.include_router(memory_router, dependencies=[Depends(require_scope("chat"))])
+app.include_router(agent_router, dependencies=[Depends(require_scope("agent"))])

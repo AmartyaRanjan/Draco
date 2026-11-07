@@ -9,6 +9,7 @@ from uuid import uuid4
 from app.agent.artifacts import ArtifactStore
 from app.agent.capabilities.visualization import build_image_provider
 from app.agent.config import AgentSettings, get_agent_settings
+from app.agent.entailment import build_entailment_judge
 from app.agent.runtime import ModeDecision, ReasoningMode, RuntimeAdapter, detect_capabilities
 from app.agent.services import Services
 from app.agent.store import AgentStore
@@ -141,4 +142,5 @@ def build_services(inference: InferenceSettings, retrieval, settings: AgentSetti
         document_lookup=registry.get_document_for_owner, pages_lookup=registry.get_pages_for_owner,
         chunk_exists=chunk_exists, chunk_neighbors=chunk_neighbors, chunk_count=chunk_count, ingest_pdf=ingest_pdf)
     svc.extra["upload_dir"] = str(UPLOAD_DIR)
+    svc.entailment = build_entailment_judge(s, adapter)  # None unless AGENT_ENTAILMENT_JUDGE=true
     return svc, adapter

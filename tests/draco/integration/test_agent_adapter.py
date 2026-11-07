@@ -5,8 +5,15 @@ from app.inference.schemas import InferenceError
 from draco.adapters import agent_runner_workload
 from draco.adapters.langgraph import graph_workload
 from draco.core import DracoSettings, Status
+from draco.core.policy import Policy
 from draco.harness import Harness
 from tests.agent_helpers import FakeRetrieval, ai, cand, make_runner
+
+
+def agent_policy(runner):
+    """Capability calls obey the execution policy (default-deny tools), like every other Draco tool."""
+    return Policy(permissions=frozenset({"read", "write", "generate"}),
+                  allowed_tools=frozenset(c.name for c in runner.reg.all()), allow_approval_required=True)
 
 
 async def test_agent_runner_through_harness_returns_normalized_result():
@@ -14,7 +21,7 @@ async def test_agent_runner_through_harness_returns_normalized_result():
                             retrieval=FakeRetrieval([cand(1, "Revenue was 5 million dollars in 2023.")]))
     h = Harness(DracoSettings(default_timeout_s=10))
     h.register("assistant", agent_runner_workload(runner))
-    r = await h.run("assistant", "What was the revenue?", user_id="alice", session_id="S")
+    r = await h.run("assistant", "What was the revenue?", user_id="alice", session_id="S", policy=agent_policy(runner))
     assert r.status == Status.completed
     assert r.output["status"] == "ok" and r.output["citations"][0]["ref"] == "S1"
     assert r.agent_id == "assistant" and r.session_id == "S"
@@ -27,7 +34,7 @@ async def test_agent_runner_errors_are_typed_and_invalid_input_is_a_contract_err
                             retrieval=FakeRetrieval([cand(1, "x")]))
     h = Harness(DracoSettings(default_timeout_s=10))
     h.register("assistant", agent_runner_workload(runner))
-    r = await h.run("assistant", "What is x?", user_id="alice")
+    r = await h.run("assistant", "What is x?", user_id="alice", policy=agent_policy(runner))
     assert r.status == Status.failed and r.error.code == "provider" and r.error.retryable
     r = await h.run("assistant", {"message": ""})
     assert r.error.code == "contract"
@@ -38,8 +45,8 @@ async def test_agent_runs_are_isolated_across_concurrent_sessions():
     runner, _ = make_runner([ai("A [S1]."), ai("B [S1].")], retrieval=FakeRetrieval([cand(1, "alpha beta")]))
     h = Harness(DracoSettings(default_timeout_s=10))
     h.register("assistant", agent_runner_workload(runner))
-    rs = await asyncio.gather(h.run("assistant", "q1", user_id="u1", session_id="s1"),
-                              h.run("assistant", "q2", user_id="u2", session_id="s2"))
+    rs = await asyncio.gather(h.run("assistant", "q1", user_id="u1", session_id="s1", policy=agent_policy(runner)),
+                              h.run("assistant", "q2", user_id="u2", session_id="s2", policy=agent_policy(runner)))
     assert all(r.status == Status.completed for r in rs)
     assert rs[0].execution_id != rs[1].execution_id
 

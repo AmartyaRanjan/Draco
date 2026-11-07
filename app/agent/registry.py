@@ -10,6 +10,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Literal
 
+from draco.core.errors import DracoError, PolicyViolation
 from pydantic import BaseModel, ValidationError
 
 from app.agent.contracts import (CapabilityError, Empty, ErrorCode, Outcome, ToolError, ToolMeta,
@@ -145,6 +146,25 @@ class CapabilityRegistry:
         if not cap.permissions <= ctx.permissions:
             return finish("error", error=ToolError(code=ErrorCode.denied,
                                                    message="Not permitted for this user."))
+        from app.agent.grounding import begin_tool, end_tool
+
+        if isinstance(raw_args, str):  # parsed here so the trace record shows the arguments
+            try:
+                raw_args = json.loads(raw_args or "{}")
+            except json.JSONDecodeError:
+                pass  # reported as invalid input below
+        try:  # under the Draco harness: execution policy, authorizer, tool.before veto, tool budget
+            gate = await begin_tool(name, permissions=cap.permissions, requires_approval=cap.requires_approval,
+                                    group=cap.group, mutates_state=cap.mutates_state, purpose=purpose)
+        except PolicyViolation as exc:
+            code = ErrorCode.approval_required if "approval" in exc.message else ErrorCode.denied
+            return finish("error", error=ToolError(code=code, message="Not permitted by the execution policy."))
+        res = await self._run(cap, name, raw_args, ctx, finish)
+        await end_tool(gate, res.status, error_code=res.error.code.value if res.error else None,
+                       output_chars=res.metadata.output_chars)
+        return res
+
+    async def _run(self, cap: Capability, name: str, raw_args: Any, ctx: CapabilityContext, finish) -> ToolResult:
         try:
             if isinstance(raw_args, str):
                 raw_args = json.loads(raw_args or "{}")
@@ -175,6 +195,10 @@ class CapabilityRegistry:
             return finish("error", error=ToolError(code=ErrorCode.internal, message="Capability returned an invalid result."))
         except PermissionError:
             return finish("error", error=ToolError(code=ErrorCode.denied, message="Not permitted."))
+        except PolicyViolation:
+            return finish("error", error=ToolError(code=ErrorCode.denied, message="Not permitted."))
+        except DracoError:
+            raise  # budget exhausted, deadline, cancellation: the execution ends, not just this call
         except Exception as exc:  # unexpected: never leak internals
             logger.error("capability_failed", extra={"tool": name, "error": type(exc).__name__,
                                                      "trace_id": ctx.trace_id})

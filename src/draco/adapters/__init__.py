@@ -11,6 +11,8 @@ from typing import Any
 
 _APP_EXPORTS = {
     "agent_runner_workload": ("app_agent", "agent_runner_workload"),
+    "agent_resume_workload": ("app_agent", "agent_resume_workload"),
+    "chat_workload": ("app_chat", "chat_workload"),
     "ingestion_workload": ("app_ingestion", "ingestion_workload"),
     "rag_workload": ("app_retrieval", "rag_workload"),
     "retrieval_workload": ("app_retrieval", "retrieval_workload"),

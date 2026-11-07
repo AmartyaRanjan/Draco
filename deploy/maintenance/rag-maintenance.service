@@ -1,0 +1,32 @@
+# Retention / cleanup job for the RAG service (scripts/agent_maintenance.py). Not installed by this repository.
+# Install (as root), adjusting paths and the user:
+#   install -m 0644 rag-maintenance.service rag-maintenance.timer /etc/systemd/system/
+#   systemctl daemon-reload && systemctl enable --now rag-maintenance.timer
+#   systemctl start rag-maintenance.service          # run once now
+#   journalctl -u rag-maintenance.service            # the JSON report of each run
+# Preview without deleting:  sudo -u rag /srv/rag/.venv/bin/python /srv/rag/scripts/agent_maintenance.py --dry-run
+[Unit]
+Description=RAG retention: expired artifacts, old feedback, conversation history, agent state
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User=rag
+Group=rag
+WorkingDirectory=/srv/rag
+# Same environment file as the API, so store paths and retention settings match what the API writes.
+EnvironmentFile=-/srv/rag/.env
+# Retention in days (0 keeps forever). Values here override .env; delete these lines to use .env values.
+Environment=CONVERSATION_RETENTION_DAYS=90
+Environment=AGENT_STATE_RETENTION_DAYS=30
+ExecStart=/srv/rag/.venv/bin/python /srv/rag/scripts/agent_maintenance.py
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=30min
+# Hardening: the job only touches local SQLite files and artifact storage.
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateNetwork=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/srv/rag/app/storage

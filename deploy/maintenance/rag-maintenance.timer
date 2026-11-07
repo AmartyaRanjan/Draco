@@ -1,0 +1,12 @@
+# Runs rag-maintenance.service daily at 03:15 (host time) with up to 30 min jitter; catches up after downtime.
+[Unit]
+Description=Daily RAG retention job
+
+[Timer]
+OnCalendar=*-*-* 03:15:00
+RandomizedDelaySec=30min
+Persistent=true
+Unit=rag-maintenance.service
+
+[Install]
+WantedBy=timers.target

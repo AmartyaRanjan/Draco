@@ -11,8 +11,8 @@ from docling_core.transforms.chunker.tokenizer.huggingface import (
     HuggingFaceTokenizer,
 )
 
+from app.ingestion.headers import chunk_token_budget
 from app.ingestion.schema import ChunkRecord
-
 
 MODEL_ID = os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
 MAX_TOKENS = int(os.getenv("EMBEDDING_MAX_LENGTH", "512"))
@@ -34,14 +34,16 @@ class _RawChunk:
 @lru_cache(maxsize=1)
 def build_chunker() -> HybridChunker:
     # Loading the tokenizer costs seconds, so build one chunker per process.
+    # With contextual headers on, part of the embedding window is reserved for the header.
+    budget = chunk_token_budget(MAX_TOKENS)
     tokenizer = HuggingFaceTokenizer.from_pretrained(
         MODEL_ID,
-        max_tokens=MAX_TOKENS,
+        max_tokens=budget,
     )
 
     return HybridChunker(
         tokenizer=tokenizer,
-        max_tokens=MAX_TOKENS,
+        max_tokens=budget,
         merge_peers=True,
     )
 
@@ -163,7 +165,7 @@ def iter_chunks(
     def count_tokens(text: str) -> int:
         return chunker.tokenizer.count_tokens(text=text)
 
-    merged = merge_small_chunks(_raw_chunks(document, chunker), count_tokens)
+    merged = merge_small_chunks(_raw_chunks(document, chunker), count_tokens, chunk_token_budget(MAX_TOKENS))
 
     for index, chunk in enumerate(merged):
         identity = (

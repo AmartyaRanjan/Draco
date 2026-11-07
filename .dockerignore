@@ -8,3 +8,14 @@ app/storage
 __pycache__
 *.pyc
 tests
+.claude
+.github
+build
+dist
+*.egg-info
+.pytest_cache
+.mypy_cache
+.ruff_cache
+docs
+examples
+deploy/**/.env
