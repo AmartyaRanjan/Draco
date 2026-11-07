@@ -17,11 +17,13 @@ from app.inference import prompts
 from app.inference.client import build_llm, map_error
 from app.inference.config import InferenceSettings
 from app.inference.evidence import EvidenceRegistry
-from app.inference.memory import ConversationStore, MemoryProvider, NullMemory, new_conversation_id
+from app.inference.memory import (ConversationStore, MemoryProvider, RollingSummarizer, build_memory_provider,
+                                  new_conversation_id)
 from app.inference.schemas import (ChatRequest, ChatResponse, InferenceError, ResponseMetadata,
                                    ToolTraceEntry)
 from app.inference.tools import TOOLS, ToolContext, tool_specs
 from app.retrieval.context import TokenCounter
+from app.retrieval.rewrite import rewrite_for_chat
 from app.retrieval.schema import RetrievalError
 from app.retrieval.service import RetrievalService
 from app.retrieval.timing import Trace
@@ -69,11 +71,13 @@ class _Call:
 class ChatOrchestrator:
     def __init__(self, retrieval: RetrievalService, settings: InferenceSettings,
                  store: ConversationStore, memory: MemoryProvider | None = None,
-                 llm_factory=build_llm, counter: TokenCounter | None = None):
+                 llm_factory=build_llm, counter: TokenCounter | None = None, summarizer=None):
         self.retrieval, self.s, self.store = retrieval, settings, store
-        self.memory = memory or NullMemory()
+        self.memory = memory or build_memory_provider(settings)  # MEMORY_BACKEND; NullMemory by default
         self.llm_factory = llm_factory
         self.counter = counter or retrieval.counter
+        self.summarizer = summarizer or (RollingSummarizer(store, settings, llm_factory, self.counter)
+                                         if getattr(settings, "summary_enabled", False) else None)
 
     # ---- LLM -------------------------------------------------------------------------
     async def _call(self, messages: list[BaseMessage], *, thinking: bool, max_tokens, tools: bool,
@@ -213,8 +217,11 @@ class ChatOrchestrator:
                 usage["output_tokens"] += c.usage.get("output_tokens", 0) or 0
 
             if req.mode == "rag":
+                with trace.stage("query_rewrite"):  # retrieval query only; the prompt keeps req.message
+                    rq = await rewrite_for_chat(req.message, cctx.recent, s, self.llm_factory)
+                trace.set(query_rewrite=rq.as_trace())
                 try:
-                    outcome = await self.retrieval.retrieve(req.message, req.document_ids, rid, user_id)
+                    outcome = await self.retrieval.retrieve(rq.query, req.document_ids, rid, user_id)
                 except RetrievalError as exc:
                     raise InferenceError(f"Retrieval failed ({exc.stage})", "retrieval_failed",
                                          exc.status_code) from exc
@@ -342,6 +349,9 @@ class ChatOrchestrator:
                                     resp.model_dump_json(), answer, tool_outputs)
         except Exception:
             logger.exception("persist_failed")
+        else:
+            if self.summarizer is not None:
+                self.summarizer.schedule(user_id, meta["conversation_id"])
         if emit:
             await emit({"event": "done", "response": resp.model_dump()})
         return resp

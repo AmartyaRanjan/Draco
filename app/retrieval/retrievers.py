@@ -1,5 +1,4 @@
 """Dense (BGE-M3 + Qdrant) and lexical (OpenSearch BM25) retrievers."""
-import asyncio
 import re
 import threading
 
@@ -16,6 +15,11 @@ GPU_LOCK = threading.Lock()
 
 _SOURCE_FIELDS = ["chunk_id", "document_id", "document_version", "chunk_index",
                   "text", "page_start", "page_end", "section_path"]
+
+
+# `search_text` (contextual header + text) exists only for chunks ingested with headers; best_fields
+# multi_match scores each document by its best field, so old chunks still match on `text`.
+SEARCH_FIELDS = ["text", "search_text", "section_path^0.5"]
 
 
 def prepare_query(query: str) -> str:
@@ -65,7 +69,7 @@ class LexicalRetriever:
             "size": self.top_k,
             "_source": _SOURCE_FIELDS,
             "query": {"bool": {
-                "must": [{"multi_match": {"query": query, "fields": ["text", "section_path^0.5"]}}],
+                "must": [{"multi_match": {"query": query, "fields": SEARCH_FIELDS}}],
                 "filter": flt,
             }},
         }

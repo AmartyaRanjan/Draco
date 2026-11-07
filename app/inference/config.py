@@ -36,6 +36,17 @@ class InferenceSettings:
     api_keys: dict  # key -> user_id
     auth_disabled: bool
     store_path: str | None
+    # Query rewriting for the plain /chat (rag) retrieval path: off | rules | llm (llm falls back to rules).
+    query_rewrite: str = "rules"
+    query_rewrite_timeout_s: float = 5.0
+    query_rewrite_max_tokens: int = 64
+    # Rolling conversation summary (off by default: it costs an LLM call and a summary can drop facts).
+    summary_enabled: bool = False
+    summary_trigger_tokens: int = 1600  # unsummarised history above this triggers a summary
+    summary_max_tokens: int = 300  # output cap of one summary call
+    summary_input_tokens: int = 2500  # transcript tokens per summary call (older turns are folded in batches)
+    # Long-term memory backend: null (default) | hybrid (Qdrant dense + OpenSearch BM25, RRF fused).
+    memory_backend: str = "null"
 
     def evidence_budget(self) -> int:
         """Input room left for document evidence after fixed sections and the output reserve."""
@@ -53,6 +64,15 @@ class InferenceSettings:
             raise ValueError("Prompt budgets leave < 512 tokens for evidence; raise INFERENCE_MAX_MODEL_LEN.")
         if self.agent_max_steps < 1 or self.agent_max_tool_calls < 0 or self.max_retries < 0:
             raise ValueError("Agent/retry limits must be non-negative (steps >= 1).")
+        if self.query_rewrite not in ("off", "rules", "llm"):
+            raise ValueError("QUERY_REWRITE_MODE must be one of off, rules, llm.")
+        if self.query_rewrite_timeout_s <= 0 or not 8 <= self.query_rewrite_max_tokens <= 256:
+            raise ValueError("QUERY_REWRITE_TIMEOUT_S must be positive and QUERY_REWRITE_MAX_TOKENS in [8, 256].")
+        if self.summary_enabled and (self.summary_trigger_tokens < 1 or not 32 <= self.summary_max_tokens <= 2048
+                                     or self.summary_input_tokens < 256):
+            raise ValueError("Summary settings: trigger >= 1, max tokens in [32, 2048], input tokens >= 256.")
+        if self.memory_backend not in ("null", "hybrid"):
+            raise ValueError("MEMORY_BACKEND must be 'null' or 'hybrid'.")
         if not self.auth_disabled and not self.api_keys:
             raise ValueError("Set APP_API_KEYS ('key:user,...') or APP_AUTH_DISABLED=true (development only).")
         return self
@@ -94,4 +114,12 @@ def get_inference_settings() -> InferenceSettings:
         api_keys=_keys(os.getenv("APP_API_KEYS", "")),
         auth_disabled=_b("APP_AUTH_DISABLED", "false"),
         store_path=os.getenv("INFERENCE_STORE_PATH") or None,
+        query_rewrite=os.getenv("QUERY_REWRITE_MODE", "rules").lower(),
+        query_rewrite_timeout_s=f(os.getenv("QUERY_REWRITE_TIMEOUT_S", "5")),
+        query_rewrite_max_tokens=i(os.getenv("QUERY_REWRITE_MAX_TOKENS", "64")),
+        summary_enabled=_b("INFERENCE_SUMMARY_ENABLED", "false"),
+        summary_trigger_tokens=i(os.getenv("INFERENCE_SUMMARY_TRIGGER_TOKENS", "1600")),
+        summary_max_tokens=i(os.getenv("INFERENCE_SUMMARY_MAX_TOKENS", "300")),
+        summary_input_tokens=i(os.getenv("INFERENCE_SUMMARY_INPUT_TOKENS", "2500")),
+        memory_backend=os.getenv("MEMORY_BACKEND", "null").lower(),
     ).validate()
