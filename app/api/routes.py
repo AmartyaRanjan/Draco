@@ -12,6 +12,7 @@ from app.db.registry import (
     get_pages_for_owner,
     register_upload,
 )
+from app.ingestion import formats
 from app.ingestion.dispatch import submit_document
 
 router = APIRouter()
@@ -22,7 +23,27 @@ UPLOAD_DIR = (
     / "uploads"
 )
 
-MAX_FILE_SIZE = 100 * 1024 * 1024  # 100 MB
+MAX_FILE_SIZE = 100 * 1024 * 1024  # 100 MB (PDF)
+
+
+def _size_cap(kind: str) -> int:
+    """Per-format upload cap; the worker re-checks the same limits before converting."""
+    return {
+        "pdf": MAX_FILE_SIZE,
+        "markdown": formats.MAX_TEXT_BYTES,
+        "text": formats.MAX_TEXT_BYTES,
+        "html": formats.MAX_HTML_BYTES,
+        "docx": formats.MAX_DOCX_BYTES,
+    }[kind]
+
+
+def _content_matches(kind: str, first_chunk: bytes) -> bool:
+    """Cheap signature check on the first chunk, so a mislabelled file fails at upload."""
+    if kind == "pdf":
+        return first_chunk.lstrip(b"\x00 \t\r\n")[:5] == b"%PDF-"
+    if kind == "docx":
+        return first_chunk[:4] == b"PK\x03\x04"
+    return b"\x00" not in first_chunk  # markdown, text, html: no binary content
 
 
 @router.post("/documents", status_code=202)
@@ -42,9 +63,14 @@ async def upload_document(file: UploadFile = File(...), user: str = Depends(uplo
     if len(safe_filename) > 100:
         suffix = Path(safe_filename).suffix[:16]
         safe_filename = safe_filename[: 100 - len(suffix)] + suffix
-    if Path(safe_filename).suffix.lower() != ".pdf":
-        # The worker only converts PDFs; failing here beats queueing a job that is certain to fail.
-        raise HTTPException(415, "Only PDF files are supported")
+    try:
+        kind = formats.detect_format(safe_filename)
+    except NotImplementedError:
+        # Failing here beats queueing a job that is certain to fail.
+        raise HTTPException(
+            415, f"Unsupported file type. Supported: {', '.join(sorted(formats.SUPPORTED_SUFFIXES))}"
+        ) from None
+    size_cap = _size_cap(kind)
     file_path = UPLOAD_DIR / f"{document_id}_{safe_filename}"
 
     size = 0
@@ -59,15 +85,15 @@ async def upload_document(file: UploadFile = File(...), user: str = Depends(uplo
                 if not chunk:
                     break
 
-                if size == 0 and not chunk.lstrip(b"\x00 \t\r\n")[:5] == b"%PDF-":
-                    raise HTTPException(415, "File content is not a PDF")
+                if size == 0 and not _content_matches(kind, chunk):
+                    raise HTTPException(415, f"File content does not look like a {kind} file")
                 size += len(chunk)
                 digest.update(chunk)
 
-                if size > MAX_FILE_SIZE:
+                if size > size_cap:
                     raise HTTPException(
                         413,
-                        "File exceeds the 100 MB limit",
+                        f"File exceeds the {size_cap // (1024 * 1024)} MB limit for {kind} files",
                     )
 
                 destination.write(chunk)

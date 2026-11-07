@@ -15,22 +15,9 @@ from dataclasses import dataclass, field
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
 import httpx
+from draco.tools.safety import looks_injected  # the single injection heuristic (re-exported for capabilities)
 
 ALLOWED_TYPES = ("text/html", "application/xhtml+xml", "text/plain", "text/markdown")
-_INJECTION = re.compile(
-    r"(ignore (all |any |the )?(previous|prior|above) (instructions|prompts)|disregard (the )?(system|previous)|"
-    r"you are now|new instructions:|system prompt|<\|im_start\|>|</?(system|assistant)>|"
-    r"(reveal|print|send|disclose) .{0,30}(api[ _-]?key|password|secret)|"
-    r"disregard (what|the user|your|all|any)|(reply|respond|answer|output|write) (only |exactly )?with (exactly |only )?(?-i:[\"'`A-Z])|"
-    r"do not (answer|follow|obey) (the )?(user|question|above)|call (the )?(tool|function|capability) )", re.I)
-
-
-def looks_injected(text: str) -> bool:
-    """Heuristic only: instruction-like text inside fetched content. Used to withhold passages from the model, as one
-    layer among several (untrusted labelling, no approval-free side effects, citation validation). Paraphrases get past it."""
-    return bool(_INJECTION.search(text))
-
-
 class UrlPolicyError(Exception):
     def __init__(self, message, code="unsafe_url"):
         super().__init__(message)
@@ -188,7 +175,7 @@ def html_to_page(raw: str, content_type: str = "text/html", *, max_chars: int = 
     text = re.sub(r"[ \t\r\f\v]+", " ", text)
     text = re.sub(r"\n\s*\n+", "\n\n", text).strip()[:max_chars]
     return ExtractedPage(title, text, split_passages(text, max_passage_chars), tables,
-                         bool(_INJECTION.search(text)))
+                         looks_injected(text))
 
 
 def split_passages(text: str, max_chars: int = 1200, min_chars: int = 200) -> list[Passage]:

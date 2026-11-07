@@ -196,14 +196,15 @@ Dataset, metrics, baselines and reproducibility instructions: [evals.md](evals.m
 ## Known Limitations
 
 - Prompt injection is mitigated, not solved; paraphrases can get past the filter ([evals.md](evals.md)).
-- Retrieval is sensitive to phrasing; contextual chunk headers and query rewriting need re-indexing.
-- The 4B model skips tools for some arithmetic. SQLite checkpoints are single-node/local state, expire after 30 days and are not encrypted at rest; a multi-replica deployment needs a shared checkpoint backend.
-- Single-host data stores, no replication or automated backup; Docker image and CI workflow have not been built/run end-to-end.
+- Chunk headers and query rewriting are implemented but not yet re-measured; existing indexes need `scripts/reindex.py` for the headers to apply.
+- The 4B model skips tools for some arithmetic. Two chat control flows (`ChatOrchestrator`, `AgentRunner`) still exist, though both run through the Draco harness.
+- Single-host data stores, no replication or automated backup. The Docker images build and ingest a small PDF end to end with CPU torch; GPU builds, large documents and the new CI jobs are untested. The starter app's SQLite state is not encrypted.
+- Auth is an API-key list with scopes and expiry, not a login system. Rate limits in Draco are per process.
 - Previously committed runtime files remain in published Git history; treat them as exposed and rotate credentials. Purge runbook: [docs/HISTORY_PURGE.md](docs/HISTORY_PURGE.md) — check exposure with `scripts/check_history_exposure.sh`.
 
 ## Roadmap
 
-Planned work, separated from what is implemented: [docs/architecture/roadmap.md](docs/architecture/roadmap.md). Priorities include real ACL enforcement via `ExecutionContext`, collapsing the two agent loops onto the harness, and live-provider evals.
+Planned work, separated from what is implemented: [docs/architecture/roadmap.md](docs/architecture/roadmap.md). Priorities: re-index a real corpus and re-run the evals, run the new CI jobs, finish merging the two chat flows, a shared rate limiter, and a real authentication provider.
 
 ## Contributing and License
 
