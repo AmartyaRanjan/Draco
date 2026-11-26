@@ -1,0 +1,281 @@
+From d4b82b9ff89dbbe91013e1d82dea19180cde9f7a Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 27 Nov 2026 05:11:13 +0530
+Subject: [PATCH] Type the approval-required error; annotate audit; add MkDocs
+ skeleton
+
+- core: add ApprovalRequired(PolicyViolation). ToolRuntime and the app
+  capability registry now classify a refusal by exception type instead of
+  searching the message for "approval", which mislabelled a denied tool
+  whose name contained that word. Regression test added; it fails on the
+  previous behaviour.
+- PRODUCTION_AUDIT.md: add a status block. Re-checked each finding against
+  current code by reading it: 7 fixed, 1 mitigated, 2 open (DRACO-003,
+  DRACO-010). Original reproductions were not re-run.
+- docs: add mkdocs.yml and docs/index.md over the existing pages. Builds with
+  --strict. HISTORY_PURGE.md and the stale PROJECT_OVERVIEW.md are excluded.
+- pyproject: add a `docs` extra; .gitignore: ignore site/.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01NHfXbnfZDrsyy8JheKowrC
+---
+ .gitignore                     |  3 +++
+ PRODUCTION_AUDIT.md            | 23 +++++++++++++++++++++++
+ app/agent/registry.py          |  4 ++--
+ docs/index.md                  | 29 +++++++++++++++++++++++++++++
+ mkdocs.yml                     | 26 ++++++++++++++++++++++++++
+ pyproject.toml                 |  1 +
+ src/draco/core/errors.py       |  5 +++++
+ src/draco/core/policy.py       |  4 ++--
+ src/draco/tools/execution.py   |  6 +++---
+ tests/draco/unit/test_tools.py | 21 +++++++++++++++++++++
+ 10 files changed, 115 insertions(+), 7 deletions(-)
+ create mode 100644 docs/index.md
+ create mode 100644 mkdocs.yml
+
+diff --git a/.gitignore b/.gitignore
+index 27d4f3c..62605d5 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -19,3 +19,6 @@ eval_results/*
+ *.egg-info/
+ build/
+ dist/
++
++# built documentation site
++site/
+diff --git a/PRODUCTION_AUDIT.md b/PRODUCTION_AUDIT.md
+index 88e4e76..47deb7a 100644
+--- a/PRODUCTION_AUDIT.md
++++ b/PRODUCTION_AUDIT.md
+@@ -1,5 +1,28 @@
+ # Draco Production Bug Audit
+ 
++> ## Status update (2026-11-27): read this before the findings below
++>
++> The findings below describe commit `de499c3` (2026-10-22) and are kept unchanged as a record. Each was
++> re-checked against the current code by reading the cited paths; **the original reproductions were not re-run**
++> (the environment lacked torch, Qdrant, OpenSearch and Redis), so "Fixed" means "the code no longer has the
++> described behaviour", not "a regression test confirms it".
++>
++> | ID | Status | Evidence in current code |
++> |---|---|---|
++> | DRACO-001 | Fixed | `app/agent/config.py` rejects `WEB_ALLOW_PRIVATE_HOSTS` in production; `app/main.py` now validates agent settings at boot |
++> | DRACO-002 | Fixed | `app/db/opensearch.py` verifies certificates for HTTPS by default and refuses `OPENSEARCH_VERIFY_CERTS=false` in production |
++> | DRACO-003 | **Open** | No subprocess, memory or page limit around Docling conversion; still listed in `production.md` section 6 |
++> | DRACO-004 | Fixed | `list_document_ids_for_owner` selects only `status = 'completed'` |
++> | DRACO-005 | Fixed | Owner scope is capped by `MAX_RETRIEVAL_DOCUMENTS`; larger scopes raise `DocumentScopeTooLarge` |
++> | DRACO-006 | Mitigated | `app/core/blocking.py` bounds admission and releases a slot only when the worker thread finishes. A timed-out thread still runs to completion (Python cannot interrupt it), but it can no longer pile up unbounded |
++> | DRACO-007 | Fixed | `authfail`, `upload` and `heavy` policies fail closed when Redis is down; only cheaper policies use the per-process fallback |
++> | DRACO-008 | Fixed | `TRUSTED_PROXY_HOPS > 0` now requires `TRUSTED_PROXY_CIDRS`, and the peer address is checked against them |
++> | DRACO-009 | Fixed | `valid_approval` checks the source's `expires_at` and an allowed source status |
++> | DRACO-010 | **Open** | Blobs remain reachable in history; see `docs/HISTORY_PURGE.md`. Run `scripts/check_history_exposure.sh` to check |
++>
++> The verdict in section 2 ("not production-ready") should be read with this table: the remaining blockers are
++> DRACO-003 and DRACO-010.
++
+ Audit date: 2026-10-22
+ Audited branch: `docs/readme-architecture`
+ Audited commit: `de499c3d967aee50fe2d544a9a40f01a0ff8bac6`
+diff --git a/app/agent/registry.py b/app/agent/registry.py
+index 7e457f1..667a7f0 100644
+--- a/app/agent/registry.py
++++ b/app/agent/registry.py
+@@ -10,7 +10,7 @@ import time
+ from dataclasses import dataclass, field
+ from typing import Any, Awaitable, Callable, Literal
+ 
+-from draco.core.errors import DracoError, PolicyViolation
++from draco.core.errors import ApprovalRequired, DracoError, PolicyViolation
+ from pydantic import BaseModel, ValidationError
+ 
+ from app.agent.contracts import (CapabilityError, Empty, ErrorCode, Outcome, ToolError, ToolMeta,
+@@ -157,7 +157,7 @@ class CapabilityRegistry:
+             gate = await begin_tool(name, permissions=cap.permissions, requires_approval=cap.requires_approval,
+                                     group=cap.group, mutates_state=cap.mutates_state, purpose=purpose)
+         except PolicyViolation as exc:
+-            code = ErrorCode.approval_required if "approval" in exc.message else ErrorCode.denied
++            code = ErrorCode.approval_required if isinstance(exc, ApprovalRequired) else ErrorCode.denied
+             return finish("error", error=ToolError(code=code, message="Not permitted by the execution policy."))
+         res = await self._run(cap, name, raw_args, ctx, finish)
+         await end_tool(gate, res.status, error_code=res.error.code.value if res.error else None,
+diff --git a/docs/index.md b/docs/index.md
+new file mode 100644
+index 0000000..5fb8b54
+--- /dev/null
++++ b/docs/index.md
+@@ -0,0 +1,29 @@
++# Draco
++
++Draco is a small Python execution harness for agent and RAG workloads. Anything shaped like
++`async def workload(ctx, input)` can be registered and run under one lifecycle: trusted identity and
++authorization, default-deny tool policy, budgets and rate limits, deadlines and cancellation, idempotency,
++redacted tracing, and durable state with resumable steps. The native framework depends only on `pydantic`.
++
++The repository also contains a starter application built on it: a FastAPI RAG and agent service
++(hybrid retrieval with reranking, a tool-using LangGraph agent, human-approved ingestion, an evaluation suite).
++
++## Start here
++
++- **Run something:** `pip install -e .` then `PYTHONPATH=src:. python -m examples.a_simple`
++- **Use the framework:** [API guide](api-guide.md)
++- **Extend it:** [Extending Draco](extension-guide.md)
++- **See what is done and what is not:** [Roadmap and status](architecture/roadmap.md)
++
++## Status
++
++Early (version 0.1.0). The roadmap page separates *done*, *partial* and *planned*. The starter application is
++hardened for a single-tenant trust domain, not multi-tenant use. Evaluation results, the production runbook and
++the agent design notes live in the repository root: see
++[evals.md](https://github.com/AmartyaRanjan/Draco/blob/main/evals.md),
++[production.md](https://github.com/AmartyaRanjan/Draco/blob/main/production.md) and
++[tools.md](https://github.com/AmartyaRanjan/Draco/blob/main/tools.md).
++
++## Source
++
++[github.com/AmartyaRanjan/Draco](https://github.com/AmartyaRanjan/Draco)
+diff --git a/mkdocs.yml b/mkdocs.yml
+new file mode 100644
+index 0000000..dd7c0f7
+--- /dev/null
++++ b/mkdocs.yml
+@@ -0,0 +1,26 @@
++site_name: Draco
++site_description: Execution harness for agent and RAG systems, with a production-oriented starter app
++repo_url: https://github.com/AmartyaRanjan/Draco
++docs_dir: docs
++theme:
++  name: material
++# Only pages that exist today. Add a page to `nav` when it has content worth reading.
++# Excluded on purpose: HISTORY_PURGE.md (describes exposed data; operator runbook) and PROJECT_OVERVIEW.md
++# (out of date and links to root files outside docs/; see the follow-up changes document).
++exclude_docs: |
++  HISTORY_PURGE.md
++  PROJECT_OVERVIEW.md
++  ingestion-map.html
++nav:
++  - Home: index.md
++  - Using the framework:
++      - API guide: api-guide.md
++      - Extending Draco: extension-guide.md
++  - Architecture:
++      - Roadmap and status: architecture/roadmap.md
++      - Document ownership: DOCUMENT_OWNERSHIP.md
++  - Project history:
++      - Framework changelog: DRACO_CHANGELOG.md
++      - Implementation log: IMPLEMENTATION_LOG.md
++      - Initial repository audit: architecture/current-state.md
++      - Reference study: architecture/reference-lessons.md
+diff --git a/pyproject.toml b/pyproject.toml
+index 3699d12..3f549f6 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -22,6 +22,7 @@ postgres = ["psycopg[binary]>=3.1"]               # draco.state.postgres.Postgre
+ crypto = ["cryptography>=42"]                    # draco.security.crypto.FernetCipher (encryption at rest)
+ otel = ["opentelemetry-api", "opentelemetry-sdk"]
+ dev = ["pytest>=8", "ruff", "mypy", "pip-audit"]
++docs = ["mkdocs>=1.6", "mkdocs-material>=9.5"]  # mkdocs serve / mkdocs build --strict
+ 
+ [tool.setuptools.packages.find]
+ # Only the framework is packaged. `app` (the starter RAG service) is deployed from source (see the Dockerfile).
+diff --git a/src/draco/core/errors.py b/src/draco/core/errors.py
+index 4426d53..d5a3a26 100644
+--- a/src/draco/core/errors.py
++++ b/src/draco/core/errors.py
+@@ -42,6 +42,11 @@ class PolicyViolation(DracoError):
+     code = "policy"
+ 
+ 
++class ApprovalRequired(PolicyViolation):
++    """The call is permitted only with an approval the policy does not grant. A PolicyViolation, so existing
++    handlers keep working; callers that must tell 'needs approval' from 'denied' test the type, not the message."""
++
++
+ class ExecutionTimeout(DracoError):
+     code = "timeout"
+     retryable = True
+diff --git a/src/draco/core/policy.py b/src/draco/core/policy.py
+index 8ff8e3b..989a032 100644
+--- a/src/draco/core/policy.py
++++ b/src/draco/core/policy.py
+@@ -4,7 +4,7 @@ from __future__ import annotations
+ from dataclasses import dataclass, field
+ from typing import Any
+ 
+-from draco.core.errors import PolicyViolation
++from draco.core.errors import ApprovalRequired, PolicyViolation
+ 
+ 
+ @dataclass(frozen=True)
+@@ -25,7 +25,7 @@ class Policy:
+         if missing:
+             raise PolicyViolation(f"tool '{name}' needs permissions {sorted(missing)}")
+         if requires_approval and not self.allow_approval_required:
+-            raise PolicyViolation(f"tool '{name}' requires approval")
++            raise ApprovalRequired(f"tool '{name}' requires approval")
+ 
+     def authorize_agent(self, agent_id: str) -> None:
+         if self.allowed_agents is not None and agent_id not in self.allowed_agents:
+diff --git a/src/draco/tools/execution.py b/src/draco/tools/execution.py
+index 4a9d947..2904d97 100644
+--- a/src/draco/tools/execution.py
++++ b/src/draco/tools/execution.py
+@@ -12,7 +12,7 @@ from typing import Any
+ from pydantic import ValidationError
+ 
+ from draco.core.context import ExecutionContext
+-from draco.core.errors import ExecutionTimeout, PolicyViolation
++from draco.core.errors import ApprovalRequired, ExecutionTimeout, PolicyViolation
+ from draco.harness.instrument import emit
+ from draco.security.audit import authorize
+ from draco.security.authorization import Resource
+@@ -78,7 +78,7 @@ async def execute_tool(tool: Tool | None, name: str, raw_args: Any, ctx: Executi
+     except ToolFailure as e:
+         return finish("error", error=ToolErrorInfo(code=e.code, message=e.message, retryable=e.retryable))
+     except PolicyViolation as e:  # the tool's own authorization check refused: a denied call, not a crashed run
+-        code = ErrorCode.approval_required if "requires approval" in e.message else ErrorCode.denied
++        code = ErrorCode.approval_required if isinstance(e, ApprovalRequired) else ErrorCode.denied
+         return finish("error", error=ToolErrorInfo(code=code, message=e.message))
+     except (asyncio.CancelledError, ExecutionTimeout):
+         raise  # cancellation and deadline outcomes belong to the harness
+@@ -136,7 +136,7 @@ class ToolRuntime:
+             await emit(ctx, "tool.before", tool=name, purpose=purpose, group=tool.group,
+                        mutates_state=tool.mutates_state)  # critical handlers may veto
+         except PolicyViolation as exc:
+-            code = ErrorCode.approval_required if "approval" in exc.message else ErrorCode.denied
++            code = ErrorCode.approval_required if isinstance(exc, ApprovalRequired) else ErrorCode.denied
+             await emit(ctx, "tool.denied", tool=name, reason=exc.message)
+             return self._failure(name, ctx, code, exc.message, tool.group)
+         ctx.budget.charge_tool_call()  # BudgetExhausted propagates: the run ends, not just the call
+diff --git a/tests/draco/unit/test_tools.py b/tests/draco/unit/test_tools.py
+index 5fb3021..b94f6e6 100644
+--- a/tests/draco/unit/test_tools.py
++++ b/tests/draco/unit/test_tools.py
+@@ -184,3 +184,24 @@ async def test_tool_runs_inside_harness_with_budget_exhaustion_outcome():
+     assert ok.status == Status.completed and ok.usage.tool_calls == 2
+     r = await h.run("agent", 5, policy=pol, limits=BudgetLimits(max_tool_calls=3))
+     assert r.status == Status.budget_exhausted and r.usage.tool_calls == 3
++
++
++async def test_denial_is_not_mistaken_for_approval_by_tool_name():
++    """The code is chosen by the error's type, not by words in its message: a denied tool whose name
++    contains 'approval' is `denied`, and a tool that really needs approval is `approval_required`."""
++    reg = CapabilityRegistry()
++
++    @native_tool(reg, name="approval_report", description="x", input_model=NoArgs)
++    async def approval_report(args, ctx):
++        return {}
++
++    @native_tool(reg, name="needs_ok", description="x", input_model=NoArgs, requires_approval=True)
++    async def needs_ok(args, ctx):
++        return {}
++
++    rt = ToolRuntime(reg)
++    _, denied = ctx_for(Policy(allowed_tools=frozenset({"approval_report"}),
++                               denied_tools=frozenset({"approval_report"})))
++    assert (await rt.call(denied, "approval_report", {})).error.code == ErrorCode.denied
++    _, gated = ctx_for(Policy(allowed_tools=frozenset({"needs_ok"})))
++    assert (await rt.call(gated, "needs_ok", {})).error.code == ErrorCode.approval_required
+-- 
+2.43.0
+
