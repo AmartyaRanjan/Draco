@@ -42,6 +42,11 @@ class PolicyViolation(DracoError):
     code = "policy"
 
 
+class ApprovalRequired(PolicyViolation):
+    """The call is permitted only with an approval the policy does not grant. A PolicyViolation, so existing
+    handlers keep working; callers that must tell 'needs approval' from 'denied' test the type, not the message."""
+
+
 class ExecutionTimeout(DracoError):
     code = "timeout"
     retryable = True

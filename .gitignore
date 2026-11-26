@@ -19,3 +19,6 @@ eval_results/*
 *.egg-info/
 build/
 dist/
+
+# built documentation site
+site/

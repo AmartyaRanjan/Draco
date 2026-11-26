@@ -184,3 +184,24 @@ async def test_tool_runs_inside_harness_with_budget_exhaustion_outcome():
     assert ok.status == Status.completed and ok.usage.tool_calls == 2
     r = await h.run("agent", 5, policy=pol, limits=BudgetLimits(max_tool_calls=3))
     assert r.status == Status.budget_exhausted and r.usage.tool_calls == 3
+
+
+async def test_denial_is_not_mistaken_for_approval_by_tool_name():
+    """The code is chosen by the error's type, not by words in its message: a denied tool whose name
+    contains 'approval' is `denied`, and a tool that really needs approval is `approval_required`."""
+    reg = CapabilityRegistry()
+
+    @native_tool(reg, name="approval_report", description="x", input_model=NoArgs)
+    async def approval_report(args, ctx):
+        return {}
+
+    @native_tool(reg, name="needs_ok", description="x", input_model=NoArgs, requires_approval=True)
+    async def needs_ok(args, ctx):
+        return {}
+
+    rt = ToolRuntime(reg)
+    _, denied = ctx_for(Policy(allowed_tools=frozenset({"approval_report"}),
+                               denied_tools=frozenset({"approval_report"})))
+    assert (await rt.call(denied, "approval_report", {})).error.code == ErrorCode.denied
+    _, gated = ctx_for(Policy(allowed_tools=frozenset({"needs_ok"})))
+    assert (await rt.call(gated, "needs_ok", {})).error.code == ErrorCode.approval_required

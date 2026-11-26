@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from draco.core.errors import PolicyViolation
+from draco.core.errors import ApprovalRequired, PolicyViolation
 
 
 @dataclass(frozen=True)
@@ -25,7 +25,7 @@ class Policy:
         if missing:
             raise PolicyViolation(f"tool '{name}' needs permissions {sorted(missing)}")
         if requires_approval and not self.allow_approval_required:
-            raise PolicyViolation(f"tool '{name}' requires approval")
+            raise ApprovalRequired(f"tool '{name}' requires approval")
 
     def authorize_agent(self, agent_id: str) -> None:
         if self.allowed_agents is not None and agent_id not in self.allowed_agents:
