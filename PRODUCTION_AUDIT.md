@@ -1,5 +1,28 @@
 # Draco Production Bug Audit
 
+> ## Status update (2026-11-27): read this before the findings below
+>
+> The findings below describe commit `de499c3` (2026-10-22) and are kept unchanged as a record. Each was
+> re-checked against the current code by reading the cited paths; **the original reproductions were not re-run**
+> (the environment lacked torch, Qdrant, OpenSearch and Redis), so "Fixed" means "the code no longer has the
+> described behaviour", not "a regression test confirms it".
+>
+> | ID | Status | Evidence in current code |
+> |---|---|---|
+> | DRACO-001 | Fixed | `app/agent/config.py` rejects `WEB_ALLOW_PRIVATE_HOSTS` in production; `app/main.py` now validates agent settings at boot |
+> | DRACO-002 | Fixed | `app/db/opensearch.py` verifies certificates for HTTPS by default and refuses `OPENSEARCH_VERIFY_CERTS=false` in production |
+> | DRACO-003 | **Open** | No subprocess, memory or page limit around Docling conversion; still listed in `production.md` section 6 |
+> | DRACO-004 | Fixed | `list_document_ids_for_owner` selects only `status = 'completed'` |
+> | DRACO-005 | Fixed | Owner scope is capped by `MAX_RETRIEVAL_DOCUMENTS`; larger scopes raise `DocumentScopeTooLarge` |
+> | DRACO-006 | Mitigated | `app/core/blocking.py` bounds admission and releases a slot only when the worker thread finishes. A timed-out thread still runs to completion (Python cannot interrupt it), but it can no longer pile up unbounded |
+> | DRACO-007 | Fixed | `authfail`, `upload` and `heavy` policies fail closed when Redis is down; only cheaper policies use the per-process fallback |
+> | DRACO-008 | Fixed | `TRUSTED_PROXY_HOPS > 0` now requires `TRUSTED_PROXY_CIDRS`, and the peer address is checked against them |
+> | DRACO-009 | Fixed | `valid_approval` checks the source's `expires_at` and an allowed source status |
+> | DRACO-010 | **Open** | Blobs remain reachable in history; see `docs/HISTORY_PURGE.md`. Run `scripts/check_history_exposure.sh` to check |
+>
+> The verdict in section 2 ("not production-ready") should be read with this table: the remaining blockers are
+> DRACO-003 and DRACO-010.
+
 Audit date: 2026-10-22
 Audited branch: `docs/readme-architecture`
 Audited commit: `de499c3d967aee50fe2d544a9a40f01a0ff8bac6`

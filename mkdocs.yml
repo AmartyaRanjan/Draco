@@ -1,0 +1,26 @@
+site_name: Draco
+site_description: Execution harness for agent and RAG systems, with a production-oriented starter app
+repo_url: https://github.com/AmartyaRanjan/Draco
+docs_dir: docs
+theme:
+  name: material
+# Only pages that exist today. Add a page to `nav` when it has content worth reading.
+# Excluded on purpose: HISTORY_PURGE.md (describes exposed data; operator runbook) and PROJECT_OVERVIEW.md
+# (out of date and links to root files outside docs/; see the follow-up changes document).
+exclude_docs: |
+  HISTORY_PURGE.md
+  PROJECT_OVERVIEW.md
+  ingestion-map.html
+nav:
+  - Home: index.md
+  - Using the framework:
+      - API guide: api-guide.md
+      - Extending Draco: extension-guide.md
+  - Architecture:
+      - Roadmap and status: architecture/roadmap.md
+      - Document ownership: DOCUMENT_OWNERSHIP.md
+  - Project history:
+      - Framework changelog: DRACO_CHANGELOG.md
+      - Implementation log: IMPLEMENTATION_LOG.md
+      - Initial repository audit: architecture/current-state.md
+      - Reference study: architecture/reference-lessons.md

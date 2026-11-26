@@ -12,7 +12,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from draco.core.context import ExecutionContext
-from draco.core.errors import ExecutionTimeout, PolicyViolation
+from draco.core.errors import ApprovalRequired, ExecutionTimeout, PolicyViolation
 from draco.harness.instrument import emit
 from draco.security.audit import authorize
 from draco.security.authorization import Resource
@@ -78,7 +78,7 @@ async def execute_tool(tool: Tool | None, name: str, raw_args: Any, ctx: Executi
     except ToolFailure as e:
         return finish("error", error=ToolErrorInfo(code=e.code, message=e.message, retryable=e.retryable))
     except PolicyViolation as e:  # the tool's own authorization check refused: a denied call, not a crashed run
-        code = ErrorCode.approval_required if "requires approval" in e.message else ErrorCode.denied
+        code = ErrorCode.approval_required if isinstance(e, ApprovalRequired) else ErrorCode.denied
         return finish("error", error=ToolErrorInfo(code=code, message=e.message))
     except (asyncio.CancelledError, ExecutionTimeout):
         raise  # cancellation and deadline outcomes belong to the harness
@@ -136,7 +136,7 @@ class ToolRuntime:
             await emit(ctx, "tool.before", tool=name, purpose=purpose, group=tool.group,
                        mutates_state=tool.mutates_state)  # critical handlers may veto
         except PolicyViolation as exc:
-            code = ErrorCode.approval_required if "approval" in exc.message else ErrorCode.denied
+            code = ErrorCode.approval_required if isinstance(exc, ApprovalRequired) else ErrorCode.denied
             await emit(ctx, "tool.denied", tool=name, reason=exc.message)
             return self._failure(name, ctx, code, exc.message, tool.group)
         ctx.budget.charge_tool_call()  # BudgetExhausted propagates: the run ends, not just the call
