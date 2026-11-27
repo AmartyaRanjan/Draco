@@ -4,19 +4,14 @@ on:
   pull_request:
 jobs:
   test:
+    # The whole framework suite with every optional extra installed (LangGraph, providers, crypto, MCP, OTel, Postgres).
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with: {python-version: "3.14"}
-      - name: Install (CPU torch; docling is only needed by the ingestion worker)
-        run: |
-          pip install --index-url https://download.pytorch.org/whl/cpu torch==2.14.1
-          grep -v -E '^(torch|docling)==' requirements.txt > /tmp/req.txt
-          pip install -r /tmp/req.txt
-          pip install -e . pytest
-      - name: Existing unit tests (no live services; integration tests skip themselves)
-        run: python -m unittest discover -s tests -t . -v
+      - name: Install draco with all extras
+        run: pip install -e ".[dev,agents,providers,crypto,mcp,otel,postgres]"
       - name: Draco tests (unit, integration, reliability, examples, deterministic evals)
         run: python -m pytest tests/draco -q
       - name: Deterministic control-plane evals
@@ -43,8 +38,8 @@ jobs:
           pip install -e ".[dev,providers]"
       - name: Reject tracked runtime data
         run: |
-          if git ls-files | grep -E '(^|/)(app/storage|uploads|artifacts|eval_results)(/|$)|(^|/)(\.env|.*\.db)$'; then
-            echo "Runtime data or environment files must not be tracked"
+          if git ls-files | grep -E '(^|/)(app/storage|uploads|artifacts|eval_results|documents)(/|$)|(^|/)(\.env|.*\.db)$|\.(pdf|docx|pptx|ipynb)$'; then
+            echo "Runtime data, documents or environment files must not be tracked"
             exit 1
           fi
       - name: Lint and types
@@ -53,49 +48,12 @@ jobs:
           mypy src/draco
       - name: Framework tests that need no ML stack
         run: python -m pytest tests/draco/unit tests/draco/reliability -q
-      - name: Built wheel imports without the starter app (non-editable install, run from another directory)
+      - name: Built wheel imports without app code or heavy deps (non-editable install, run from another directory)
         run: |
           python -m pip wheel . --no-deps -w /tmp/wheel
           python -m venv /tmp/clean && /tmp/clean/bin/pip install /tmp/wheel/draco-*.whl
           cd /tmp && /tmp/clean/bin/python -I -c "import sys, draco, draco.tools, draco.security, draco.adapters.retrieval; assert not {'app','torch','langgraph'} & set(sys.modules)"
-      - name: Dependency audit (framework deps, then the app's pinned requirements)
+      - name: Dependency audit (framework deps)
         run: |
           python -m pip uninstall --yes draco
           pip-audit --skip-editable --strict --desc
-          pip-audit -r requirements.txt --no-deps --disable-pip --desc
-
-  docker-images:
-    # Builds the API and ingestion-worker images (CPU torch to keep the runner's disk in budget). Nothing is pushed.
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Free runner disk (torch + docling layers are several GB)
-        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc && df -h /
-      - uses: docker/setup-buildx-action@v4
-      - name: Build API image
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: Dockerfile
-          push: false
-          load: true
-          tags: rag-api:ci
-          build-args: TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
-      - name: API image imports the app and draco, and answers /health
-        run: |
-          docker run --rm --entrypoint python rag-api:ci -c "import draco.tools.safety, app.main"
-          docker run -d --name api -p 127.0.0.1:18000:8000 -e APP_AUTH_DISABLED=true -e RATE_LIMIT_ENABLED=false rag-api:ci
-          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:18000/health && break; sleep 2; done
-          curl -fsS http://127.0.0.1:18000/health
-          docker rm -f api
-      - name: Build worker image
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: deploy/worker/Dockerfile
-          push: false
-          load: true
-          tags: rag-worker:ci
-          build-args: TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
-      - name: Worker image imports the ingestion stack
-        run: docker run --rm --entrypoint python rag-worker:ci -c "import docling, rq, app.ingestion.worker, app.ingestion.convert"

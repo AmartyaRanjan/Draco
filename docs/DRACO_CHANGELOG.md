@@ -1,6 +1,20 @@
 # Draco framework changelog
 
-Newest first. This file tracks the `src/draco` framework; the root `CHANGELOG.md` covers the ingestion pipeline.
+Newest first. The RAG service's own changelog moved to [draco-rag](https://github.com/AmartyaRanjan/draco-rag) with the service.
+
+## Unreleased: the RAG service moves to its own repository
+
+### Removed (breaking)
+- The RAG service (`app/`, its tests, scripts, Dockerfiles, `deploy/`, `requirements.txt` and its docs) moved to [AmartyaRanjan/draco-rag](https://github.com/AmartyaRanjan/draco-rag). This repository is now only the framework.
+- The application-specific adapters moved with it, as `app.draco_adapters`: `draco.adapters.app_agent` (`agent_runner_workload`, `agent_resume_workload`), `app_chat` (`chat_workload`), `app_retrieval` (`retrieval_workload`, `rag_workload` over the app's `RetrievalService`), `app_ingestion` (`ingestion_workload`), `app_capabilities` (`register_app_capabilities`), `app_trace` (`AppLogExporter`), `conversation` (`sqlite_conversation_store`) and `errors` (`map_app_error`). `from draco.adapters import <name>` no longer resolves these names. The generic adapters (`draco.adapters.retrieval`, `ingestion`, `model_provider`, `providers`, `langgraph`, `langgraph_checkpoint`) are unchanged.
+- The `app` extra is removed.
+- The `rag` suite of the deterministic eval runner moved with the adapter it exercised.
+
+### Changed
+- `test_import_boundaries` now requires that no Draco module imports `app` (previously `draco.adapters` was exempt).
+- Lower bounds restored to the oldest supported versions: `pydantic>=2.6`, `langgraph>=1.0` (a Dependabot group update had raised them to the newest releases). Dependabot now uses `versioning-strategy: increase-if-necessary`, so it no longer raises library lower bounds.
+- CI: the `test` job installs every optional extra instead of the app stack, and the `docker-images` job moved to draco-rag. The tracked-data check also rejects `documents/` and `.pdf`/`.docx`/`.pptx`/`.ipynb` files.
+- `scripts/check_history_exposure.sh` and `docs/HISTORY_PURGE.md` now also cover the personal documents and coursework once committed at the repository root, which the previous check missed.
 
 ## 0.3.0 (unreleased): state, limits and the unified request path
 

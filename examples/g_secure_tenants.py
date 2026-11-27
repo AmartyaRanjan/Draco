@@ -1,4 +1,4 @@
-"""Example G: trusted identity, tenant isolation, role grants and an audit trail. No starter app involved."""
+"""Example G: trusted identity, tenant isolation, role grants and an audit trail."""
 import asyncio
 
 from pydantic import BaseModel

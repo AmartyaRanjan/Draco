@@ -1,6 +1,6 @@
 # Contributing to Draco
 
-Thank you for considering a contribution. Draco is a small execution framework (`src/draco`) and a starter RAG/agent service built on it (`app/`). This guide explains how the repository is organised, how to set it up, what a change has to pass before it is merged, and the conventions that keep the project honest and safe.
+Thank you for considering a contribution. Draco is a small execution framework (`src/draco`). The RAG/agent service built on it lives in its own repository, [draco-rag](https://github.com/AmartyaRanjan/draco-rag). This guide explains how the repository is organised, how to set it up, what a change has to pass before it is merged, and the conventions that keep the project honest and safe.
 
 By taking part you agree to the [Code of Conduct](CODE_OF_CONDUCT.md). Security problems are **not** reported through issues; see [SECURITY.md](SECURITY.md).
 
@@ -39,7 +39,7 @@ Questions and design discussion belong in [GitHub Discussions](https://github.co
 ## 2. Before you start
 
 - **Open an issue first for anything non-trivial**: a new feature, a public API change, a change to security behaviour, or anything touching more than a few files. Agree on the approach before writing it; this avoids rework on both sides. Typos, small fixes and obvious bugs can go straight to a pull request.
-- **Check what already exists.** [docs/architecture/roadmap.md](docs/architecture/roadmap.md) lists what is done, partial and planned. [production.md](production.md) section 6 lists known gaps. Your idea may already be tracked.
+- **Check what already exists.** [docs/architecture/roadmap.md](docs/architecture/roadmap.md) lists what is done, partial and planned. Your idea may already be tracked.
 - **Keep changes focused.** One concern per pull request. Do not mix a refactor with a behaviour change.
 
 ## 3. How the repository is organised
@@ -47,26 +47,23 @@ Questions and design discussion belong in [GitHub Discussions](https://github.co
 ```
 src/draco/     the framework: harness, core contracts, agents/router, tools, security,
                state stores, observability, plugins, adapters
-app/           the starter service: FastAPI, ingestion, retrieval, inference, agent
 tests/draco/   framework tests (unit, integration, reliability, deterministic evals)
-tests/         starter-app tests (original suite)
 examples/      runnable examples; they also run as tests
-scripts/       operational and evaluation scripts
-deploy/        vLLM, worker and maintenance deployment files
+scripts/       retention, live evaluation and maintenance scripts
 docs/          API guide, extension guide, architecture, project overview
 ```
 
 Rules that are enforced by tests, not just by convention:
 
-- **Dependency direction.** Layers import downward only, and only `draco.adapters` may import `app`. See `tests/draco/unit/test_import_boundaries.py`.
-- **The framework's only hard dependency is `pydantic`.** Everything else (`httpx`, LangGraph, MCP, OpenTelemetry, Postgres, cryptography) is an optional extra and must be imported lazily. Importing `draco` must not import `app`, `torch`, `langgraph`, `psycopg` or `cryptography`.
-- **The wheel contains only `draco*`.** The `app` package is deployed from source.
+- **Dependency direction.** Layers import downward only, and no Draco module imports application code. See `tests/draco/unit/test_import_boundaries.py`.
+- **The framework's only hard dependency is `pydantic`.** Everything else (`httpx`, LangGraph, MCP, OpenTelemetry, Postgres, cryptography) is an optional extra and must be imported lazily. Importing `draco` must not import `torch`, `langgraph`, `psycopg` or `cryptography`.
+- **The wheel contains only `draco*`.**
 
-If you are unsure where code belongs: reusable, application-independent behaviour goes in `src/draco`; anything specific to the bundled RAG service goes in `app/` and is reached through a `draco.adapters` module.
+If you are unsure where code belongs: reusable, application-independent behaviour goes in `src/draco`. Anything specific to the RAG service, including its adapters to Draco (`app.draco_adapters`), goes in [draco-rag](https://github.com/AmartyaRanjan/draco-rag).
 
 ## 4. Development setup
 
-You need **Python 3.11 or newer**. CI runs the framework on 3.11, 3.12 and 3.14 and the full service tests on 3.14.
+You need **Python 3.11 or newer**. CI runs the lean framework checks on 3.11, 3.12 and 3.14, and the full suite with every extra on 3.14.
 
 ```bash
 git clone https://github.com/AmartyaRanjan/Draco.git
@@ -93,17 +90,10 @@ This installs `pydantic` plus the dev tools (`pytest`, `ruff`, `mypy`, `pip-audi
 | `mcp` | MCP tools |
 | `otel` | the OpenTelemetry exporter |
 
-### Starter app (only if you change `app/`)
+To run the whole suite as CI's `test` job does:
 
 ```bash
-pip install -r requirements.txt     # large: torch, docling, transformers
-pip install -e ".[dev,agents,providers]"
-```
-
-`requirements.txt` pins exact versions and installs as written. The app tests use fakes and do not need running services. Do not install CUDA wheels just to run tests; the CPU wheel index works:
-
-```bash
-pip install --index-url https://download.pytorch.org/whl/cpu torch==2.14.1
+pip install -e ".[dev,agents,providers,crypto,mcp,otel,postgres]"
 ```
 
 ### Optional services for specific tests
@@ -116,7 +106,6 @@ pip install --index-url https://download.pytorch.org/whl/cpu torch==2.14.1
   python -m pytest tests/draco/unit/test_stores.py -q
   docker rm -f draco-test-pg
   ```
-- **Docker images.** `docker build -t rag-api .` and `docker build -f deploy/worker/Dockerfile -t rag-worker .` (add `--build-arg TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu` for CPU-only).
 
 > **Never point tests or experiments at shared or production services.** A `.env` file may contain URLs of real Qdrant, OpenSearch or Redis instances. Use throwaway containers on `127.0.0.1` for anything that writes.
 
@@ -130,9 +119,6 @@ python -m pytest tests/draco -q
 ruff check src tests/draco examples
 mypy src/draco
 
-# starter-app tests (only needed if app/ or its adapters changed)
-python -m unittest discover -s tests -t .
-
 # deterministic control-plane evals
 python -m tests.draco.eval.runner
 ```
@@ -141,11 +127,10 @@ CI jobs and what each proves:
 
 | Job | Proves |
 |---|---|
-| `test` | the service and framework suites pass with the app stack installed (Python 3.14, CPU torch) |
-| `draco-core` (3.11, 3.12, 3.14) | the framework installs and works with **only** `pydantic` and `httpx`: lint, types, the lean test subset, a non-editable wheel that imports without `app`, and a dependency audit |
-| `docker-images` | the API and worker images build and import |
+| `test` | the framework suite and deterministic evals pass with every optional extra installed (Python 3.14) |
+| `draco-core` (3.11, 3.12, 3.14) | the framework installs and works with **only** `pydantic` and `httpx`: lint, types, the lean test subset, a non-editable wheel that imports without heavy dependencies, and a dependency audit |
 
-**Run the lean subset before you push** if you touched framework code or its tests. A test that quietly needs an app-only dependency passes in a full environment and fails in `draco-core`:
+**Run the lean subset before you push** if you touched framework code or its tests. A test that quietly needs an optional dependency passes in a full environment and fails in `draco-core`:
 
 ```bash
 python -m venv /tmp/lean && /tmp/lean/bin/pip install -e ".[dev,providers]"
@@ -154,11 +139,11 @@ python -m venv /tmp/lean && /tmp/lean/bin/pip install -e ".[dev,providers]"
 
 A test that needs an optional package must skip when it is absent (`pytest.importorskip("bs4")`), not fail.
 
-**Dependency audit.** `draco-core` runs `pip-audit` over the installed environment and over `requirements.txt`. A new advisory against a pinned or bundled package fails the build. Fix it by upgrading, not by ignoring it. If you believe an advisory does not apply, say why in the pull request.
+**Dependency audit.** `draco-core` runs `pip-audit` over the installed environment. A new advisory against an installed package fails the build. Fix it by upgrading, not by ignoring it. If you believe an advisory does not apply, say why in the pull request.
 
 ## 6. Code standards
 
-- **Formatting and lint:** `ruff` is configured in `pyproject.toml` (line length 110, rules `E F I B UP`). CI lints `src`, `tests/draco` and `examples`. `app/` still has older findings; do not add new ones in the code you touch.
+- **Formatting and lint:** `ruff` is configured in `pyproject.toml` (line length 110, rules `E F I B UP`). CI lints `src`, `tests/draco` and `examples`.
 - **Types:** `mypy src/draco` must be clean. Public functions and classes in the framework are annotated.
 - **Async:** workloads are `async def (ctx, input) -> output`. Do not block the event loop; run blocking I/O with `asyncio.to_thread`.
 - **Errors:** raise the typed errors in `draco.core.errors` (`PolicyViolation`, `ContractError`, `ProviderError`, ...). Set `retryable` honestly: it drives retries and HTTP status mapping. Client-facing messages must not contain secrets, response bodies or internal paths.
@@ -171,23 +156,22 @@ A test that needs an optional package must skip when it is absent (`pytest.impor
 
 Every behaviour change comes with a test.
 
-- **Framework tests** go in `tests/draco/` (`unit/`, `integration/`, `reliability/`, `eval/`). **App tests** go in `tests/`.
+- **Framework tests** go in `tests/draco/` (`unit/`, `integration/`, `reliability/`, `eval/`).
 - **Bug fixes need a regression test that fails without the fix.** Prove it: revert the fix, watch the test fail, restore the fix. Say so in the pull request.
-- **No live services in the default suite.** Use the in-repo fakes (`examples/_fakes.py`, `tests/agent_helpers.py`) and `httpx.MockTransport` for HTTP providers. Tests that require a real service must skip themselves with a clear reason.
+- **No live services in the default suite.** Use in-test fakes and `httpx.MockTransport` for HTTP providers. Tests that require a real service must skip themselves with a clear reason.
 - **Tests must be deterministic.** No sleeping on wall-clock time where a fake clock or an injected `now` works, no dependence on test order, no network.
 - **Security behaviour is tested from the attacker's side**: a different tenant, a forged argument, a missing identity, an over-returning backend. See `tests/draco/unit/test_security.py` and `examples/g_secure_tenants.py` for the style.
 - **Do not weaken or delete a test to make a change pass.** If a test is wrong, fix it and explain why.
 - The examples in `examples/` run as tests; keep them working and runnable with `PYTHONPATH=src:. python -m examples.<name>`.
 
-Live evaluation scripts (`scripts/eval_*.py`, `scripts/draco_live_eval.py`) need a running stack or a provider key and are opt-in. Report numbers only from runs you actually did, with the dataset and settings.
+The live evaluation script (`scripts/draco_live_eval.py`) needs a running stack or a provider key and are opt-in. Report numbers only from runs you actually did, with the dataset and settings.
 
 ## 8. Security-sensitive changes
 
 Draco enforces authorization, tenant isolation and tool policy in code, not in prompts. Changes in these areas get extra scrutiny:
 
 - `draco.security`, `draco.core.identity`, `draco.core.policy`, `draco.tools`
-- document ownership and retrieval filters
-- authentication, API-key scopes and rate limiting in `app/core`
+- retrieval authorization (`draco.adapters.retrieval`)
 - anything that parses untrusted input: uploads, web pages, tool output
 
 Principles to follow:
@@ -205,8 +189,8 @@ If you find a vulnerability, **do not open a public issue or pull request.** Fol
 
 This project prefers precise statements over impressive ones. Documentation is part of the change.
 
-- Update the relevant docs in the same pull request: [docs/api-guide.md](docs/api-guide.md) for framework behaviour, [docs/extension-guide.md](docs/extension-guide.md) for extension points, [production.md](production.md) for operations and known gaps, and the [roadmap](docs/architecture/roadmap.md) when you finish or add planned work.
-- **Changelogs:** framework changes go in [docs/DRACO_CHANGELOG.md](docs/DRACO_CHANGELOG.md); starter-app and ingestion changes go in [CHANGELOG.md](CHANGELOG.md). Add an entry under the unreleased heading and mention behaviour changes explicitly.
+- Update the relevant docs in the same pull request: [docs/api-guide.md](docs/api-guide.md) for framework behaviour, [docs/extension-guide.md](docs/extension-guide.md) for extension points, and the [roadmap](docs/architecture/roadmap.md) when you finish or add planned work.
+- **Changelog:** changes go in [docs/DRACO_CHANGELOG.md](docs/DRACO_CHANGELOG.md). Add an entry under the unreleased heading and mention behaviour changes explicitly.
 - **Separate verified from unverified.** State what you ran and what you did not (for example "tested against `httpx.MockTransport`, not a live endpoint"). Do not claim a measured improvement you did not measure.
 - **Update stale statements you find**, including in old docs. A wrong sentence is a bug.
 - Link with relative paths. Keep code samples runnable.
@@ -215,14 +199,8 @@ This project prefers precise statements over impressive ones. Documentation is p
 
 - Prefer the standard library. A new runtime dependency needs a stated reason in the pull request.
 - **Framework (`pyproject.toml`):** the only hard dependency is `pydantic`. New third-party libraries must be an optional extra.
-- **App (`requirements.txt`):** exact pins. Change a pin only when you must (security fix, bug, needed feature), and check that the whole file still resolves:
-
-  ```bash
-  uv pip compile requirements.txt --python-version 3.14 -o /tmp/resolved.txt
-  pip-audit -r requirements.txt --no-deps --disable-pip --desc
-  ```
-- Packages with native or heavy dependencies (`torch`, `docling`, `pillow`) interact. When a bump conflicts, find the smallest compatible upgrade and verify real behaviour (for example, convert a PDF in the worker image) rather than relying on the resolver alone.
-- Dependabot opens update pull requests; they follow the same checks as any other change.
+- **Lower bounds are the oldest versions Draco supports**, not the newest available. Raise one only when Draco needs a newer feature or fix, and say which.
+- Dependabot opens update pull requests (configured not to raise lower bounds); they follow the same checks as any other change.
 
 ## 11. Branches and commits
 
@@ -255,7 +233,7 @@ Draft pull requests are welcome for early feedback.
 ## 13. Review and merging
 
 - A maintainer reviews every pull request. Expect questions about edge cases, failure modes and security, not only style.
-- **All CI jobs must be green** before merging: `test`, the three `draco-core` jobs and `docker-images`.
+- **All CI jobs must be green** before merging: `test` and the three `draco-core` jobs.
 - Reviewers look for: a test that proves the change, accurate documentation, no widened permissions, no new global state, honest error handling, and no unrelated edits.
 - Pull requests are normally **squash-merged** with a clear message. Large multi-part changes may be merged with their commits preserved.
 - Maintainers handle releases and version bumps.
@@ -270,9 +248,7 @@ Draft pull requests are welcome for early feedback.
 
 **Add a model provider or state store.** Implement the protocol (`ModelProvider`, `ExecutionStore` / `EventStore` / `CheckpointStore`), keep the optional import lazy, add it to the contract tests (the store suite is parametrised across backends), and never include response bodies or credentials in error messages.
 
-**Change retrieval or ingestion in `app/`.** Chunking, embedding or index-schema changes affect existing indexes and may need `scripts/reindex.py`. State this in the pull request, and do not claim a quality improvement without running the evaluation (see [evals.md](evals.md)).
-
-**Change the Docker images or CI.** Build the image locally before pushing, and run any changed workflow logic in the same environment CI uses where you can (for example a Python 3.11 environment for the `draco-core` matrix).
+**Change CI.** Run any changed workflow logic in the same environment CI uses where you can (for example a Python 3.11 environment for the `draco-core` matrix).
 
 ## 15. Getting help
 

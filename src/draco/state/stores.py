@@ -1,5 +1,5 @@
 """Persistence contracts. Execution history, events and step checkpoints are kept apart from
-conversational memory (which `app.inference.memory` already provides and Draco reuses)."""
+conversational memory, which belongs to the application."""
 from __future__ import annotations
 
 import json

@@ -20,7 +20,7 @@ Draco has not made a tagged release yet. Security fixes are made on `main`, and 
 
 Please include, once a private channel exists:
 
-- what the problem is and which component is affected (`src/draco/...` or `app/...`),
+- what the problem is and which component is affected (for example `draco.security` or `draco.state.sqlite`),
 - the commit or version you tested,
 - steps to reproduce or a proof of concept,
 - the impact as you understand it (for example "a user of tenant A can read tenant B's documents"),
@@ -40,18 +40,19 @@ Please give us a reasonable chance to fix an issue before disclosing it publicly
 
 **In scope**
 
-- Authorization or tenant-isolation bypass in `draco.security`, `draco.harness`, `draco.tools` or the document-ownership checks in `app/`.
+- Authorization or tenant-isolation bypass in `draco.security`, `draco.harness`, `draco.tools` or `draco.adapters.retrieval`.
 - Policy bypass: a tool running without an explicit allow, a child execution widening its parent's `Policy`, an approval-required tool running without approval.
 - Leaks of secrets, API keys, provider response bodies or other tenants' identifiers in traces, persisted events, logs or error messages.
-- Authentication problems in the starter app: API-key scope or expiry bypass, brute-force lockout bypass, rate-limit bypass.
-- Injection in the SQL stores, unsafe handling of uploaded files (PDF, DOCX, HTML, Markdown), SSRF in the web-fetch capability, and zip-bomb or resource-exhaustion paths in ingestion.
+- Injection in the SQL stores (`draco.state`), and resource-exhaustion paths in the harness.
+
+Problems in the RAG service (API-key auth, uploads, web fetching, ingestion, document ownership) belong to [draco-rag](https://github.com/AmartyaRanjan/draco-rag); report them there the same way.
 - Vulnerable dependencies where the vulnerable code is reachable from Draco.
 
 **Out of scope**
 
 - Prompt injection that merely changes what a model says. It is mitigated, not solved, and the limits are documented. A prompt injection that **bypasses authorization, policy or tenant isolation** is in scope.
 - Findings that need an already-compromised host, a malicious operator, or access to the process environment.
-- Missing hardening that the documentation assigns to the deployment: TLS termination, WAF and DDoS protection, network egress filtering, and exposing the application port directly. See [production.md](production.md).
+- Missing hardening that the documentation assigns to the deployment: TLS termination, WAF and DDoS protection, network egress filtering, and exposing the application port directly.
 - Denial of service by sheer volume against an unprotected deployment.
 - Reports produced by an automated scanner with no demonstrated impact.
 
@@ -59,11 +60,9 @@ Please give us a reasonable chance to fix an issue before disclosing it publicly
 
 These are documented and are not, by themselves, vulnerabilities. Read them before deploying:
 
-- [production.md](production.md) section 6 lists known gaps (single-host data stores, static API-key list, state not encrypted in the starter app, unmeasured retrieval changes, and more).
 - [docs/api-guide.md](docs/api-guide.md) (Security) lists what Draco enforces, what you must configure, and known gaps.
-- [PRODUCTION_AUDIT.md](PRODUCTION_AUDIT.md) records an earlier audit and its findings.
 - **Committed runtime files in Git history.** Earlier commits contained runtime files. Treat anything that was ever in this repository's history as exposed and rotate the credentials involved. [docs/HISTORY_PURGE.md](docs/HISTORY_PURGE.md) describes the purge, and `scripts/check_history_exposure.sh` checks exposure.
-- Draco is hardened for a **single-tenant trust domain** in the starter app. The framework supports tenant isolation, but you must supply authentication and configure authorization (see the API guide).
+- Draco supports tenant isolation, but you must supply authentication and configure authorization (see the API guide).
 
 ## Handling secrets when contributing
 
@@ -73,4 +72,4 @@ These are documented and are not, by themselves, vulnerabilities. Read them befo
 
 ## Dependency and supply-chain checks
 
-CI audits the framework's dependencies and the pinned `requirements.txt` with `pip-audit` on every pull request, and a failing audit fails the build. See [CONTRIBUTING.md](CONTRIBUTING.md#10-dependencies).
+CI audits the framework's dependencies with `pip-audit` on every pull request, and a failing audit fails the build. See [CONTRIBUTING.md](CONTRIBUTING.md#10-dependencies).
