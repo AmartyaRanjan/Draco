@@ -51,9 +51,9 @@ jobs:
       - name: Built wheel imports without app code or heavy deps (non-editable install, run from another directory)
         run: |
           python -m pip wheel . --no-deps -w /tmp/wheel
-          python -m venv /tmp/clean && /tmp/clean/bin/pip install /tmp/wheel/draco-*.whl
+          python -m venv /tmp/clean && /tmp/clean/bin/pip install /tmp/wheel/draco_harness-*.whl
           cd /tmp && /tmp/clean/bin/python -I -c "import sys, draco, draco.tools, draco.security, draco.adapters.retrieval; assert not {'app','torch','langgraph'} & set(sys.modules)"
       - name: Dependency audit (framework deps)
         run: |
-          python -m pip uninstall --yes draco
+          python -m pip uninstall --yes draco-harness
           pip-audit --skip-editable --strict --desc
