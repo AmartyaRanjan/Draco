@@ -12,6 +12,6 @@ from draco.tools.execution import ToolRuntime, execute_tool
 from draco.tools.native import AnyOutput, NoArgs, native_tool
 from draco.tools.registry import ToolRegistry
 
-# names used before tools were decoupled from the `app` package
+# names kept from before tools were decoupled from the RAG application
 CapabilityError = ToolFailure
 CapabilityRegistry = ToolRegistry

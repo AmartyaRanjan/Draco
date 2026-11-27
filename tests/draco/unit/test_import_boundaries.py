@@ -1,5 +1,5 @@
-"""Layering rule: only draco.adapters may import the starter `app` package, and the framework layers
-(including tools and security) must be importable without it, the ML stack, LangGraph or httpx."""
+"""Layering rules: no Draco module imports an application package (`app`), layers import only downward,
+and the framework layers (including tools and security) import without the ML stack, LangGraph or httpx."""
 
 import ast
 import pathlib
@@ -7,17 +7,6 @@ import subprocess
 import sys
 
 SRC = pathlib.Path(__file__).resolve().parents[3] / "src" / "draco"
-FRAMEWORK = [
-    "core",
-    "plugins",
-    "policies",
-    "harness",
-    "observability",
-    "state",
-    "agents",
-    "tools",
-    "security",
-]
 ORDER = {
     "core": 0,
     "plugins": 1,
@@ -40,11 +29,10 @@ def imports(path):
             yield node.module
 
 
-def test_only_adapters_import_app():
-    for pkg in FRAMEWORK:
-        for f in (SRC / pkg).rglob("*.py"):
-            bad = [m for m in imports(f) if m == "app" or m.startswith("app.")]
-            assert not bad, f"{f.relative_to(SRC)} imports {bad}"
+def test_no_module_imports_app():
+    for f in SRC.rglob("*.py"):
+        bad = [m for m in imports(f) if m == "app" or m.startswith("app.")]
+        assert not bad, f"{f.relative_to(SRC)} imports {bad}"
 
 
 def test_no_upward_dependencies():
@@ -63,7 +51,7 @@ def test_framework_imports_without_app_or_heavy_deps():
     root = SRC.parents[1]
     paths = [str(SRC.parent)] + [
         p for p in sys.path if p and pathlib.Path(p).resolve() != root
-    ]  # repo root (with `app`) excluded
+    ]  # repo root excluded
     code = (
         f"import sys; sys.path[:0] = {paths!r}; import draco.core, draco.plugins, draco.policies, draco.harness, "
         "draco.observability, draco.state, draco.agents, draco.tools, draco.security, draco.adapters.retrieval, draco.adapters.model_provider\n"
