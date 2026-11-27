@@ -1,4 +1,4 @@
-"""Postgres backend for execution history, events and step checkpoints (`pip install draco[postgres]`).
+"""Postgres backend for execution history, events and step checkpoints (`pip install draco-harness[postgres]`).
 
 Same protocols, schema shape, retention and encryption behaviour as `SqliteStore`; suitable for several
 harness processes sharing one database. psycopg 3 is imported only when a store is constructed."""
@@ -75,7 +75,7 @@ class PostgresStore(SqlStore):
             import psycopg
             from psycopg.rows import dict_row
         except ImportError as exc:  # pragma: no cover - depends on the environment
-            raise ConfigurationError("PostgresStore needs psycopg 3: pip install 'draco[postgres]'") from exc
+            raise ConfigurationError("PostgresStore needs psycopg 3: pip install 'draco-harness[postgres]'") from exc
         self._psycopg, self._dict_row = psycopg, dict_row
         self._dsn = dsn
         self._timeout = connect_timeout_s

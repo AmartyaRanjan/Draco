@@ -2,7 +2,12 @@
 
 Newest first. The RAG service's own changelog moved to [draco-rag](https://github.com/AmartyaRanjan/draco-rag) with the service.
 
-## Unreleased: the RAG service moves to its own repository
+## Unreleased: the RAG service moves to its own repository; the package is now `draco-harness`
+
+### Changed (packaging)
+- The distribution is named **`draco-harness`** (the name `draco` on PyPI belongs to an unrelated project). Install with `pip install draco-harness[extra]`; the import name stays `draco`. Error messages and docs that suggested `pip install draco[...]` now say `draco-harness[...]`. Nothing was ever published under the old name, so there is no upgrade path to handle.
+- Releases are built and published from GitHub Actions with PyPI trusted publishing (`.github/workflows/release.yml`).
+
 
 ### Removed (breaking)
 - The RAG service (`app/`, its tests, scripts, Dockerfiles, `deploy/`, `requirements.txt` and its docs) moved to [AmartyaRanjan/draco-rag](https://github.com/AmartyaRanjan/draco-rag). This repository is now only the framework.

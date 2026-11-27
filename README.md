@@ -57,17 +57,22 @@ asyncio.run(main())
 | `draco.core` | `ExecutionContext`, `Identity`, `Policy`, budgets, results, typed errors, events | `pydantic` |
 | `draco.harness` | Lifecycle: identity, auth, guardrails, execution, deadlines, persistence, `resume()` | |
 | `draco.agents` | `AgentRegistry`, `Router`, handoffs, delegation, loop/depth limits | |
-| `draco.tools` | `Tool`, `ToolRegistry`, `ToolRuntime` (policy, retries, untrusted output), MCP tools | `draco[mcp]` |
-| `draco.security` | `Authorizer`, audit events, `Secret`, `FernetCipher` (encryption at rest) | `draco[crypto]` |
-| `draco.state` | Execution/event/checkpoint stores (`InMemory`, `Sqlite`, `Postgres`); retention | `draco[postgres]` |
-| `draco.observability`| `Tracer`, redaction, JSONL and OpenTelemetry exporters | `draco[otel]` |
+| `draco.tools` | `Tool`, `ToolRegistry`, `ToolRuntime` (policy, retries, untrusted output), MCP tools | `draco-harness[mcp]` |
+| `draco.security` | `Authorizer`, audit events, `Secret`, `FernetCipher` (encryption at rest) | `draco-harness[crypto]` |
+| `draco.state` | Execution/event/checkpoint stores (`InMemory`, `Sqlite`, `Postgres`); retention | `draco-harness[postgres]` |
+| `draco.observability`| `Tracer`, redaction, JSONL and OpenTelemetry exporters | `draco-harness[otel]` |
 | `draco.plugins` | Service registry, plugin host, input/output guardrails, rate limiting | |
 | `draco.adapters` | Translation to external components (`model_provider`, `providers`, `retrieval`, `ingestion`, `langgraph`) | see below |
 
 *Dependency direction is enforced by tests: layers only import downward, and no Draco module imports application code.*
 
 ## ⚙️ Installation
-*(`uv pip` is recommended, but standard `pip` works identically)*
+The package is named **`draco-harness`**; you still `import draco`. Once a release is on PyPI:
+```bash
+pip install draco-harness                  # native framework (pydantic only)
+pip install "draco-harness[agents,providers]"
+```
+From a clone, for development *(`uv pip` is recommended, but standard `pip` works identically)*:
 ```bash
 uv pip install -e .              # Native framework
 uv pip install -e ".[agents]"    # LangGraph adapter

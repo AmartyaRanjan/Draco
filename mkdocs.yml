@@ -16,6 +16,7 @@ nav:
   - Using the framework:
       - API guide: api-guide.md
       - Extending Draco: extension-guide.md
+      - Releasing: RELEASING.md
   - Architecture:
       - Roadmap and status: architecture/roadmap.md
   - Project history:

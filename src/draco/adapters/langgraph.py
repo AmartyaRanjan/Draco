@@ -1,5 +1,5 @@
 """Run any compiled LangGraph graph as a Draco workload. LangGraph stays the graph engine; install with
-`pip install draco[agents]` (this module itself imports nothing from langgraph).
+`pip install draco-harness[agents]` (this module itself imports nothing from langgraph).
 
 Semantics:
 - thread id: the Draco execution id, so a checkpointer's state is keyed to the execution. `Harness.resume`
