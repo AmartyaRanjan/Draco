@@ -71,7 +71,7 @@ jobs:
       - uses: actions/checkout@v7
       - name: Free runner disk (torch + docling layers are several GB)
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc && df -h /
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
       - name: Build API image
         uses: docker/build-push-action@v7
         with:
