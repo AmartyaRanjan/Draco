@@ -30,11 +30,10 @@ body:
     id: layer
     attributes:
       label: Where does it belong?
-      description: Reusable behaviour goes in the framework; behaviour specific to the bundled RAG service goes in the starter app.
+      description: Behaviour specific to the RAG service belongs in https://github.com/AmartyaRanjan/draco-rag instead.
       options:
         - Framework (src/draco)
-        - Starter app (app/)
-        - Both / not sure
+        - Not sure
         - Documentation
     validations:
       required: true

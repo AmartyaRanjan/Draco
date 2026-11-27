@@ -1,4 +1,4 @@
-"""Validated framework settings. Provider settings (vLLM, Qdrant ...) stay in the `app` settings."""
+"""Validated framework settings. Provider settings (vLLM, Qdrant ...) belong to the application."""
 from __future__ import annotations
 
 import os

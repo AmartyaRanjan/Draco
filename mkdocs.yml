@@ -1,5 +1,5 @@
 site_name: Draco
-site_description: Execution harness for agent and RAG systems, with a production-oriented starter app
+site_description: Execution harness for agent and RAG systems
 repo_url: https://github.com/AmartyaRanjan/Draco
 docs_dir: docs
 theme:
@@ -18,7 +18,6 @@ nav:
       - Extending Draco: extension-guide.md
   - Architecture:
       - Roadmap and status: architecture/roadmap.md
-      - Document ownership: DOCUMENT_OWNERSHIP.md
   - Project history:
       - Framework changelog: DRACO_CHANGELOG.md
       - Implementation log: IMPLEMENTATION_LOG.md

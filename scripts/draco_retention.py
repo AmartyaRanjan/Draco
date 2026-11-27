@@ -3,7 +3,7 @@
 
 Settings come from DRACO_* environment variables (DracoSettings.from_env) and can be overridden here:
 
-  python scripts/draco_retention.py --state-path app/storage/draco.db --execution-days 30 --event-days 7
+  python scripts/draco_retention.py --state-path /var/lib/draco/draco.db --execution-days 30 --event-days 7
   DRACO_STATE_URL=postgresql://draco@db/draco DRACO_EVENT_RETENTION_DAYS=14 python scripts/draco_retention.py
 
 Executions in `waiting` or `running` state (and their descendants) are never deleted. Prints the purge

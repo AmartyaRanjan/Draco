@@ -1,5 +1,7 @@
 # Draco: what exists today and where it is going
 
+> **Note (2026-11-27):** the RAG service described here (`app/`, `deploy/` and its docs) now lives in [draco-rag](https://github.com/AmartyaRanjan/draco-rag); links to its documents point there. This repository is the framework only. The rest of this document is kept as written.
+
 Written 2026-10-14. This is the entry point to the project. It summarises what has been built, then lays out the plan to turn it into a reusable Python package for building RAG and agentic systems. Detailed evidence for each part lives in the linked documents; this file does not repeat their numbers beyond the headline ones.
 
 Contents: [1 Purpose](#1-purpose) · [2 What is built today](#2-what-is-built-today) · [3 Known gaps](#3-known-gaps-today) · [4 The package plan](#4-the-package-plan) · [5 Design principles](#5-design-principles) · [6 Proposed layout](#6-proposed-package-layout) · [7 Roadmap](#7-roadmap) · [8 Risks](#8-risks-and-how-to-avoid-them) · [9 Document map](#9-document-map)
@@ -16,7 +18,7 @@ The next step is to extract the reusable parts into a **Python package** so that
 
 ## 2. What is built today
 
-About 8,500 lines of Python in `app/`, 27 commits, 343 tests (per [production.md](../production.md)). The service is a FastAPI app over four backing services: Redis, Qdrant, OpenSearch and a vLLM server.
+About 8,500 lines of Python in `app/`, 27 commits, 343 tests (per [production.md](https://github.com/AmartyaRanjan/draco-rag/blob/main/production.md)). The service is a FastAPI app over four backing services: Redis, Qdrant, OpenSearch and a vLLM server.
 
 ### 2.1 Ingestion (`app/ingestion/`, `app/db/`)
 
@@ -30,18 +32,18 @@ About 8,500 lines of Python in `app/`, 27 commits, 343 tests (per [production.md
 
 ### 2.2 Retrieval (`app/retrieval/`)
 
-Dense and BM25 retrieval in parallel, exact `chunk_id` deduplication, Reciprocal Rank Fusion (k=60), a ColBERT rerank that shares the BGE-M3 backbone, a relevance threshold with a minimum-evidence fallback, and token-budgeted context building with `[S#]` evidence labels. Retrieval p50 is about 464 ms. Details: [RETRIEVAL_LOG.md](../RETRIEVAL_LOG.md).
+Dense and BM25 retrieval in parallel, exact `chunk_id` deduplication, Reciprocal Rank Fusion (k=60), a ColBERT rerank that shares the BGE-M3 backbone, a relevance threshold with a minimum-evidence fallback, and token-budgeted context building with `[S#]` evidence labels. Retrieval p50 is about 464 ms. Details: [RETRIEVAL_LOG.md](https://github.com/AmartyaRanjan/draco-rag/blob/main/RETRIEVAL_LOG.md).
 
 ### 2.3 Inference (`app/inference/`, `deploy/vllm/`)
 
 - A grounded chat orchestrator with streaming, conversation memory (SQLite) and citation extraction.
 - Qwen3-4B-FP8 served by vLLM with a pinned image and revision, thinking mode toggled per request, hermes tool-call parsing.
 - A recorded search for a QAT checkpoint found none that could be verified, so a PTQ FP8 model is used.
-- Details: [INFERENCE_LOG.md](../INFERENCE_LOG.md).
+- Details: [INFERENCE_LOG.md](https://github.com/AmartyaRanjan/draco-rag/blob/main/INFERENCE_LOG.md).
 
 ### 2.4 Agent (`app/agent/`)
 
-A three-level hierarchy built on LangGraph, documented in [tools.md](../tools.md):
+A three-level hierarchy built on LangGraph, documented in [tools.md](https://github.com/AmartyaRanjan/draco-rag/blob/main/tools.md):
 
 1. **Supervisor graph.** Classify the request, configure the reasoning mode, plan capabilities, execute, check the context budget, summarise if needed, evaluate the evidence, generate the answer, validate citations.
 2. **Capability groups.** 21 capabilities across knowledge, web research, knowledge management, artifact creation, visualization, file analysis, computation, validation and context management.
@@ -57,17 +59,17 @@ Notable mechanisms:
 
 ### 2.5 Platform hardening (`app/core/`, `app/api/`)
 
-API-key authentication on every data route with brute-force lockout, a Redis-backed token-bucket rate limiter, an LLM admission gate, request-size caps, upload validation, JSON logs with request ids, Prometheus `/metrics`, liveness and readiness probes, boot-time config validation, a Dockerfile and a CI workflow. Scope: a single-tenant trust domain. Details: [production.md](../production.md).
+API-key authentication on every data route with brute-force lockout, a Redis-backed token-bucket rate limiter, an LLM admission gate, request-size caps, upload validation, JSON logs with request ids, Prometheus `/metrics`, liveness and readiness probes, boot-time config validation, a Dockerfile and a CI workflow. Scope: a single-tenant trust domain. Details: [production.md](https://github.com/AmartyaRanjan/draco-rag/blob/main/production.md).
 
 ### 2.6 Evaluation (`scripts/`, `tests/eval/`, `eval_results/`)
 
-An 84-question RAG gold set and a 45-case agent suite, covering retrieval ablations, judged generation, tool calling, multi-step tasks, reliability (pass^k), prompt-injection safety and fault injection. Headline numbers: hit@5 0.79 as users write questions and 0.97 with the document descriptor removed, judged faithfulness 0.95, 8 of 8 unanswerable questions correctly declined, agent tool selection 0.71. Evaluation found two real agent defects that code review did not, and both were fixed. These are not leaderboard-comparable numbers. Details: [evals.md](../evals.md).
+An 84-question RAG gold set and a 45-case agent suite, covering retrieval ablations, judged generation, tool calling, multi-step tasks, reliability (pass^k), prompt-injection safety and fault injection. Headline numbers: hit@5 0.79 as users write questions and 0.97 with the document descriptor removed, judged faithfulness 0.95, 8 of 8 unanswerable questions correctly declined, agent tool selection 0.71. Evaluation found two real agent defects that code review did not, and both were fixed. These are not leaderboard-comparable numbers. Details: [evals.md](https://github.com/AmartyaRanjan/draco-rag/blob/main/evals.md).
 
 ---
 
 ## 3. Known gaps today
 
-These are the most important items from the existing documents. The full lists are in [production.md](../production.md) section 6 and [tools.md](../tools.md) section 10.
+These are the most important items from the existing documents. The full lists are in [production.md](https://github.com/AmartyaRanjan/draco-rag/blob/main/production.md) section 6 and [tools.md](https://github.com/AmartyaRanjan/draco-rag/blob/main/tools.md) section 10.
 
 1. **No per-user document access control.** Any authenticated user can retrieve any indexed document.
 2. **Prompt injection is mitigated, not solved.** A paraphrased injection was not caught by the filter.
@@ -211,10 +213,10 @@ Per-user document ownership and access control (the owner column in the registry
 | File | What it covers |
 |---|---|
 | [README.md](../README.md) | One-line project description |
-| [CHANGELOG.md](../CHANGELOG.md) | PDF detection and Docling conversion iterations 1 to 5 |
-| [RETRIEVAL_LOG.md](../RETRIEVAL_LOG.md) | Hybrid retrieval implementation |
-| [INFERENCE_LOG.md](../INFERENCE_LOG.md) | Model selection, vLLM deployment, inference layer |
-| [tools.md](../tools.md) | The hierarchical agent and tool layer, capability status, limitations, next steps |
-| [evals.md](../evals.md) | Evaluation method, results, what the evaluations changed |
-| [production.md](../production.md) | Production hardening decisions, configuration, runbook, gaps |
-| [docs/ingestion-map.html](ingestion-map.html) | Ingestion pipeline map |
+| [CHANGELOG.md](https://github.com/AmartyaRanjan/draco-rag/blob/main/CHANGELOG.md) | PDF detection and Docling conversion iterations 1 to 5 |
+| [RETRIEVAL_LOG.md](https://github.com/AmartyaRanjan/draco-rag/blob/main/RETRIEVAL_LOG.md) | Hybrid retrieval implementation |
+| [INFERENCE_LOG.md](https://github.com/AmartyaRanjan/draco-rag/blob/main/INFERENCE_LOG.md) | Model selection, vLLM deployment, inference layer |
+| [tools.md](https://github.com/AmartyaRanjan/draco-rag/blob/main/tools.md) | The hierarchical agent and tool layer, capability status, limitations, next steps |
+| [evals.md](https://github.com/AmartyaRanjan/draco-rag/blob/main/evals.md) | Evaluation method, results, what the evaluations changed |
+| [production.md](https://github.com/AmartyaRanjan/draco-rag/blob/main/production.md) | Production hardening decisions, configuration, runbook, gaps |
+| [docs/ingestion-map.html](https://github.com/AmartyaRanjan/draco-rag/blob/main/docs/ingestion-map.html) | Ingestion pipeline map |

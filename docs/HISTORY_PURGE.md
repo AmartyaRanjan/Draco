@@ -11,10 +11,12 @@ that contained them, from every existing clone, and from GitHub's cached views.
 | `app/storage/documents.db` | SQLite registry: filenames, local paths, owner ids, content hashes, error strings |
 | `app/storage/uploads/` | 11 personal documents uploaded through the app (CVs, university lab reports, coursework, books) |
 | `eval_results/` | Evaluation run outputs (question sets, responses, metrics) |
+| repository root: `*.pdf`, `*.docx`, `*.pptx`, `*.ipynb`, `MCTS.py`, `random_walk.py`, `trajectory_sampling.py`, `Exercise_lab7.txt`, `colorize.design-*.css` | Personal documents and coursework committed at the root before `documents/` was ignored (CVs, a job-application list, lab reports and notebooks, reports, a book), removed in `1113e09` |
 
 Removed from the working tree by commits `9ba0eed` and `3c776b8`; still present
 in history objects on both `upstream` (AmartyaRanjan/Draco) and `origin`
-(harshitsharmaaaa/Draco). Check current exposure any time with
+(harshitsharmaaaa/Draco). The RAG service moved to AmartyaRanjan/draco-rag with
+its history filtered to app paths, so none of these files are in that repository. Check current exposure any time with
 `scripts/check_history_exposure.sh` (read-only, exits non-zero while blobs are
 reachable).
 
@@ -44,7 +46,10 @@ reachable).
 
    ```
    pip install git-filter-repo
-   git filter-repo --invert-paths --path app/storage --path eval_results
+   git filter-repo --invert-paths --path app/storage --path eval_results \
+     --path-regex '\.(pdf|docx|pptx|ipynb)$' \
+     --path MCTS.py --path random_walk.py --path trajectory_sampling.py \
+     --path Exercise_lab7.txt --path-glob 'colorize.design-*.css'
    ```
 
 4. **Force-push the rewritten history:**
@@ -74,5 +79,6 @@ referencing old SHAs will show the pre-purge diff history.
 
 - CI job `draco-core` fails when runtime data or `.env` files become tracked
   again (`.github/workflows/ci.yml`, "Reject tracked runtime data").
+- The same check rejects tracked `documents/` and `.pdf`/`.docx`/`.pptx`/`.ipynb` files.
 - `app/storage/`, `eval_results/`, `documents/` and `.env*` are gitignored;
   keep runtime state out of the worktree when committing.

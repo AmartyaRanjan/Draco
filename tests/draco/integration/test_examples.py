@@ -9,7 +9,6 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 EXPECT = {
     "a_simple": ["status\": \"completed", "trace events: ['execution.started', 'security.allowed', 'execution.finished']"],
-    "b_rag": ["execution_id == retrieval request_id: True", "status=budget_exhausted", "degraded=['bm25']"],
     "c_multi_agent": ["path: ['triage', 'math']", "- auditor [completed]", "unknown agent -> failed routing"],
     "d_tool": ["'fahrenheit': 212.0", "'denied'", "'invalid_input'"],
     "e_recovery": ["'charge card' not repeated", "same execution id: True", "attempts: 2"],
