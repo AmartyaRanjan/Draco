@@ -45,7 +45,7 @@ postgres = ["psycopg[binary]>=3.1"]               # draco.state.postgres.Postgre
 crypto = ["cryptography>=42"]                    # draco.security.crypto.FernetCipher (encryption at rest)
 otel = ["opentelemetry-api", "opentelemetry-sdk"]
 dev = ["pytest>=8", "ruff", "mypy", "pip-audit"]
-docs = ["mkdocs>=1.6", "mkdocs-material>=9.5"]  # mkdocs serve / mkdocs build --strict
+docs = ["mkdocs>=1.6", "mkdocs-material>=9.8.2"]  # mkdocs serve / mkdocs build --strict
 
 [tool.setuptools.packages.find]
 # Only the framework is packaged. `app` (the starter RAG service) is deployed from source (see the Dockerfile).
