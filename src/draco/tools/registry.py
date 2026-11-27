@@ -5,6 +5,7 @@ from draco.tools.contracts import Tool
 
 
 class ToolRegistry:
+    """Holds the tools an application defines. Names are unique; `ToolRuntime` executes them under policy."""
     def __init__(self) -> None:
         self._tools: dict[str, Tool] = {}
 

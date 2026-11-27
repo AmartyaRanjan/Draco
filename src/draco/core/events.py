@@ -17,6 +17,7 @@ logger = logging.getLogger("draco.events")
 
 @dataclass(frozen=True)
 class Event:
+    """One lifecycle, hook or audit event: a name, the execution ids it belongs to, a `data` dict and a timestamp."""
     name: str
     execution_id: str | None = None
     parent_execution_id: str | None = None

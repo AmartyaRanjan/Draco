@@ -10,10 +10,12 @@ from draco.observability.redaction import Redactor
 
 
 class Exporter(Protocol):
+    """Protocol for trace sinks: an object with `export(record: dict)`."""
     def export(self, record: dict[str, Any]) -> None: ...
 
 
 class MemoryExporter:
+    """Keeps trace records in a list, for tests and local inspection."""
     def __init__(self) -> None:
         self.records: list[dict[str, Any]] = []
 
@@ -53,6 +55,7 @@ class Tracer:
             ex.export(rec)
 
     def trace(self, execution_id: str) -> list[dict[str, Any]]:
+        """The redacted events recorded so far for one execution, in order."""
         return list(self._by_exec.get(execution_id, []))
 
     def tree(self, root_execution_id: str) -> dict[str, Any]:

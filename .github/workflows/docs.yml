@@ -1,0 +1,48 @@
+name: docs
+# Builds the documentation site with `mkdocs build --strict` (a broken link, anchor or reference fails the build).
+# Pull requests only build. A push to main also publishes to GitHub Pages.
+# One-time setup: Settings > Pages > Build and deployment > Source: "GitHub Actions". See docs/RELEASING.md.
+on:
+  push:
+    branches: [main]
+    paths: ["docs/**", "mkdocs.yml", "src/**", "pyproject.toml", ".github/workflows/docs.yml"]
+  pull_request:
+    paths: ["docs/**", "mkdocs.yml", "src/**", "pyproject.toml", ".github/workflows/docs.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with: {python-version: "3.14"}
+      - name: Install the docs tooling
+        run: pip install ".[docs]"
+      - name: Build (strict)
+        env:
+          NO_MKDOCS_2_WARNING: "1"
+        run: mkdocs build --strict
+      - uses: actions/upload-pages-artifact@v3
+        with: {path: site}
+
+  deploy:
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

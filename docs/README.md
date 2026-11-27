@@ -1,5 +1,7 @@
 # Documentation index
 
+**Start at the documentation site: <https://amartyaranjan.github.io/Draco/>.** It has the quickstart, tutorials, concepts, how-to guides and the Python API reference, and this folder is its source. Everything below is the same material grouped by file, for browsing on GitHub.
+
 Where to find things. Documents are grouped by what you are trying to do. Dates in logs are when they were written; the guides and the roadmap are kept current.
 
 ## Start here

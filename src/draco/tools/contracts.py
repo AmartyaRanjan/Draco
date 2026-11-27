@@ -88,6 +88,11 @@ ToolHandler = Callable[[Any, ExecutionContext], Awaitable[BaseModel | dict[str, 
 
 @dataclass(frozen=True)
 class Tool:
+    """A callable the model may request, plus the rules for running it: a pydantic `input_model` that validates
+    arguments, the `permissions` it needs, whether it `mutates_state` (such tools are never auto-retried),
+    `requires_approval`, `parallel_safe`, `untrusted_output` (flag results as possibly containing injected
+    instructions), a `timeout_s` and an output size cap. Usually created with `native_tool`.
+    """
     name: str
     description: str
     input_model: type[BaseModel]

@@ -57,6 +57,12 @@ class CancellationToken:
 
 @dataclass(frozen=True)
 class ExecutionContext:
+    """Everything a running workload knows about itself, passed as the first argument: ids (`execution_id`,
+    `session_id`, `correlation_id`), the trusted `identity` (with `user_id` and `tenant_id` derived from it),
+    the `policy`, the shared `budget`, the cancellation token and deadline, and `services`. Use
+    `ctx.metadata` for per-request data, never module-level globals. Call `check()` inside long loops so
+    cancellation and deadlines take effect.
+    """
     execution_id: str = field(default_factory=new_id)
     parent_execution_id: str | None = None
     session_id: str | None = None
@@ -76,6 +82,11 @@ class ExecutionContext:
 
     def child(self, *, agent_id: str | None = None, deadline: float | None = None,
               policy: Policy | None = None, metadata: dict[str, Any] | None = None) -> ExecutionContext:
+        """Derive a context for nested work: new execution id, same session, correlation id, identity and budget.
+        Cancelling the parent cancels the child, not the reverse. The child's policy may only narrow the parent's,
+        and `metadata` may not set trusted fields (`identity`, `tenant_id`, `policy`, ...); either raises
+        `PolicyViolation`.
+        """
         self.budget.check_depth(self.depth + 1)
         if policy is not None and not policy.narrows(self.policy):
             raise PolicyViolation("a child execution cannot widen its parent's policy")
@@ -90,6 +101,7 @@ class ExecutionContext:
                        metadata={**self.metadata, **(metadata or {})})
 
     def time_left(self) -> float | None:
+        """Seconds until the deadline, or `None` if there is none."""
         return None if self.deadline is None else self.deadline - time.monotonic()
 
     def check(self) -> None:
@@ -101,6 +113,7 @@ class ExecutionContext:
         self.budget.check_duration()
 
     def ids(self) -> dict[str, str | None]:
+        """The ids that tie this execution to its parent, session and correlation, for logs and events."""
         return {"execution_id": self.execution_id, "parent_execution_id": self.parent_execution_id,
                 "session_id": self.session_id, "agent_id": self.agent_id,
                 "correlation_id": self.correlation_id}

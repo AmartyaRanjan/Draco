@@ -1,12 +1,15 @@
 # Draco API guide
 
+This page is a dense cheat sheet of the whole API. If you are new to Draco, start with the [Quickstart](getting-started/quickstart.md) and the [tutorials](tutorials/guarded-tools.md); for signatures, see the [Python API reference](reference/core.md).
+
 ```
-pip install -e .            # native framework: pydantic only
-pip install -e ".[dev]"     # + pytest, ruff, mypy, pip-audit
-pip install -e ".[providers]" # OpenAI-compatible and Anthropic providers
-pip install -e ".[postgres]"  # PostgreSQL state store (psycopg 3)
-pip install -e ".[crypto]"    # encryption at rest (cryptography)
-pip install -e ".[mcp]"     # optional MCP tools      (.[otel] OpenTelemetry, .[agents] LangGraph)
+pip install draco-harness                    # native framework: pydantic only
+pip install "draco-harness[providers]"       # OpenAI-compatible and Anthropic providers
+pip install "draco-harness[agents]"          # LangGraph adapter and durable checkpoints
+pip install "draco-harness[postgres]"        # PostgreSQL state store (psycopg 3)
+pip install "draco-harness[crypto]"          # encryption at rest (cryptography)
+pip install "draco-harness[mcp]"             # MCP tools
+pip install "draco-harness[otel]"            # OpenTelemetry exporter
 ```
 Draco does not import application code (enforced by `tests/draco/unit/test_import_boundaries.py`). The RAG service built on it, with its own adapters (`app.draco_adapters`), is [draco-rag](https://github.com/AmartyaRanjan/draco-rag).
 
@@ -52,7 +55,7 @@ Runnable versions of everything below are in `examples/` (`python -m examples.a_
 ## Tools (`draco.tools`)
 Native contracts: `Tool` (name, `input_model`, `handler(args, ctx)`, `permissions`, `mutates_state`, `requires_approval`, `parallel_safe`, `untrusted_output`, `timeout_s`, `max_output_chars`), `ToolRegistry`, `ToolResult` (`success | empty | pending | error | timeout`), `ErrorCode`, `ToolFailure`. `native_tool(registry, name=, description=, input_model=, ...)` registers an async function; raise `ToolFailure(ErrorCode.x, msg, retryable=...)` for expected failures. (`CapabilityRegistry`/`CapabilityError` remain as aliases.)
 
-`ToolRuntime(registry).call(ctx, name, args)`: validates input, then enforces in this order: `Policy.authorize_tool` (allow/deny lists, permissions, approval), the harness **authorizer** (`tool.call`, audited), `tool.before` veto hooks, budget charge, concurrency limit, serialization when `parallel_safe=False`, timeout (also bounded by the execution deadline), retries for retryable errors on **non-mutating** tools only, untrusted-output flagging (`looks_injected`), and a `tool.after` event that records argument *names*, never values. A handler that raises `PolicyViolation` yields a `denied` result. `rt.specs(ctx)` lists only tools the policy allows (approval-required tools only when `allow_approval_required`). Native tool handlers re-check the policy, so reaching a handler without `ToolRuntime.call` does not bypass it. Tool arguments are untrusted: when an argument names a resource, authorize that resource inside the handler (`draco.security.authorize`), see `examples/g_secure_tenants.py`.
+`ToolRuntime(registry).call(ctx, name, args)` works through these steps in order: the tool exists, `Policy.authorize_tool` (allow/deny lists, permissions, approval), the harness **authorizer** (`tool.call`, audited), `tool.before` veto hooks, the budget charge, input validation, then the concurrency limit, serialization when `parallel_safe=False`, the timeout (also bounded by the execution deadline), retries for retryable errors on **non-mutating** tools only, untrusted-output flagging (`looks_injected`), and a `tool.after` event that records argument *names*, never values. A handler that raises `PolicyViolation` yields a `denied` result. `rt.specs(ctx)` lists only tools the policy allows (approval-required tools only when `allow_approval_required`). Native tool handlers re-check the policy, so reaching a handler without `ToolRuntime.call` does not bypass it. Tool arguments are untrusted: when an argument names a resource, authorize that resource inside the handler (`draco.security.authorize`), see `examples/g_secure_tenants.py`.
 
 MCP: `await register_mcp_tools(registry, client, server_name=, allow={...})`; an explicit allow-list is mandatory, descriptions are sanitized, outputs flagged untrusted, tools treated as mutating and gated by the `mcp` permission.
 

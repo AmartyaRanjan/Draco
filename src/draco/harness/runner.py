@@ -51,6 +51,13 @@ class WorkloadSpec:
 
 
 class Harness:
+    """Runs workloads under one lifecycle: identity and authorization, policy, guardrails, budgets, deadlines,
+    cancellation, idempotency, tracing and durable state.
+
+    Register any `async def workload(ctx, input)` with `register`, then call `run`. `resume` re-runs an
+    interrupted or waiting execution under the same id. `on` subscribes to lifecycle events, `cancel` stops a
+    running execution, and `tracer` and `store` give access to traces and persisted history.
+    """
     def __init__(self, settings: DracoSettings | None = None, *, store: Any = None,
                  host: PluginHost | None = None, exporters: list[Exporter] | None = None,
                  strict_persistence: bool = False, authorizer: Authorizer | None = None,
@@ -89,6 +96,10 @@ class Harness:
     # -- registration / hooks -------------------------------------------------------------
     def register(self, name: str, fn: Workload, *, description: str = "",
                  capabilities: frozenset[str] | set[str] = frozenset(), **meta: Any) -> None:
+        """Register a workload under `name`. A workload is any `async def (ctx, input) -> output`. `capabilities` are
+        labels the router can select on; extra keyword arguments are kept as metadata. Registering a name twice
+        raises `ContractError`.
+        """
         if name in self._workloads:
             raise ContractError(f"workload '{name}' already registered")
         self._workloads[name] = WorkloadSpec(name, fn, description, frozenset(capabilities), meta)

@@ -28,6 +28,10 @@ _BY_CODE: dict[str, type[DracoError]] = {c.code: c for c in (
 
 
 class Status(StrEnum):
+    """How an execution ended: `completed`, `failed`, `cancelled`, `timeout`, `budget_exhausted`, `handoff`
+    (the workload asked to pass control to another agent) or `waiting` (paused, resumable with
+    `Harness.resume`).
+    """
     completed = "completed"
     failed = "failed"
     cancelled = "cancelled"
@@ -39,6 +43,10 @@ class Status(StrEnum):
 
 @dataclass
 class ErrorInfo:
+    """A client-safe description of a failure: the exception type, a stable `code`, a `message`, whether a
+    retry could help (`retryable`) and extra `details`. Unknown exceptions are reduced to their type name so
+    internal messages never leak.
+    """
     type: str
     code: str
     message: str  # client-safe: unknown exceptions are reduced to their type name
@@ -54,6 +62,7 @@ class ErrorInfo:
 
 @dataclass
 class Usage:
+    """Counts charged to an execution: model calls, tool calls, retries, tokens and duration in milliseconds."""
     model_calls: int = 0
     tool_calls: int = 0
     retries: int = 0
@@ -63,6 +72,7 @@ class Usage:
 
 @dataclass
 class Handoff:
+    """Returned by a workload to pass control to another registered agent. The router validates the destination before it runs."""
     destination: str
     reason: str = ""
     input: Any = None
@@ -77,6 +87,11 @@ class Waiting:
 
 @dataclass
 class ExecutionResult:
+    """The outcome of `Harness.run` or `Harness.resume`. `run` always returns one of these instead of raising for
+    workload failures. Check `status` (or `ok`), read `output` on success or `error` on failure, and call
+    `raise_for_status()` to turn a failure back into a typed `DracoError`. `replayed` is true when the result
+    came from an idempotency key instead of a fresh run.
+    """
     status: Status
     execution_id: str
     output: Any = None
@@ -95,6 +110,7 @@ class ExecutionResult:
 
     @property
     def ok(self) -> bool:
+        """True when the status is `completed`."""
         return self.status == Status.completed
 
     def to_dict(self) -> dict[str, Any]:

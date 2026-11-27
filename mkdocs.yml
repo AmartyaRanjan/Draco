@@ -1,26 +1,135 @@
 site_name: Draco
-site_description: Execution harness for agent and RAG systems
+site_description: An execution harness for agent and RAG workloads, with identity, policy, budgets, tracing and resumable state.
+site_url: https://amartyaranjan.github.io/Draco/
 repo_url: https://github.com/AmartyaRanjan/Draco
+repo_name: AmartyaRanjan/Draco
+edit_uri: edit/main/docs/
 docs_dir: docs
+strict: true
+
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
+
 theme:
   name: material
-# Only pages that exist today. Add a page to `nav` when it has content worth reading.
-# Excluded on purpose: HISTORY_PURGE.md (describes exposed data; operator runbook) and PROJECT_OVERVIEW.md
-# (out of date and links to root files outside docs/; see the follow-up changes document).
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep purple
+      accent: deep purple
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep purple
+      accent: deep purple
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.action.edit
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            docstring_style: null
+            show_root_heading: true
+            show_root_full_path: false
+            show_source: false
+            show_signature_annotations: true
+            separate_signature: true
+            members_order: source
+            heading_level: 3
+            show_if_no_docstring: false
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets:
+      base_path: ["."]
+      check_paths: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+
+# README.md in docs/ is the index for people browsing the folder on GitHub; the site's home is index.md.
+# HISTORY_PURGE.md describes exposed data (operator runbook), and PROJECT_OVERVIEW.md is dated.
 exclude_docs: |
+  README.md
   HISTORY_PURGE.md
   PROJECT_OVERVIEW.md
-  ingestion-map.html
+
 nav:
   - Home: index.md
-  - Using the framework:
-      - API guide: api-guide.md
-      - Extending Draco: extension-guide.md
-      - Releasing: RELEASING.md
-  - Architecture:
+  - Get started:
+      - Installation: getting-started/installation.md
+      - Quickstart: getting-started/quickstart.md
+  - Tutorials:
+      - Guard a tool-using agent: tutorials/guarded-tools.md
+      - Isolate tenants: tutorials/multi-tenant.md
+      - Recover from a crash: tutorials/recovery.md
+  - Concepts:
+      - How a run works: concepts/lifecycle.md
+      - Context, results and errors: concepts/execution-model.md
+      - Security model: concepts/security.md
+      - Budgets and limits: concepts/budgets.md
+      - State, steps and resume: concepts/state.md
+      - Tracing and redaction: concepts/observability.md
+  - How-to guides:
+      - Add a tool: guides/tools.md
+      - Route between agents: guides/agents.md
+      - Call a model provider: guides/model-providers.md
+      - Wrap a retrieval backend: guides/retrieval.md
+      - Wrap a LangGraph graph: guides/langgraph.md
+      - Persist, encrypt and purge state: guides/persistence.md
+      - Rate-limit tenants and users: guides/rate-limits.md
+      - Export traces: guides/tracing.md
+      - Write a plugin: extension-guide.md
+  - Reference:
+      - Configuration: reference/configuration.md
+      - Errors and statuses: reference/errors.md
+      - Events: reference/events.md
+      - API cheat sheet: api-guide.md
+      - Python API:
+          - Core: reference/core.md
+          - Harness: reference/harness.md
+          - Tools: reference/tools.md
+          - Agents: reference/agents.md
+          - Security: reference/security.md
+          - State: reference/state.md
+          - Observability: reference/observability.md
+          - Plugins and policies: reference/plugins.md
+          - Adapters: reference/adapters.md
+  - Project:
       - Roadmap and status: architecture/roadmap.md
-  - Project history:
-      - Framework changelog: DRACO_CHANGELOG.md
+      - Changelog: DRACO_CHANGELOG.md
+      - Releasing: RELEASING.md
       - Implementation log: IMPLEMENTATION_LOG.md
       - Initial repository audit: architecture/current-state.md
       - Reference study: architecture/reference-lessons.md

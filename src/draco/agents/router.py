@@ -18,6 +18,7 @@ ROUTER = "router"
 
 @dataclass
 class RoutingDecision:
+    """Where a request goes and why: the destination agent, the reason, an optional input for it, and which strategy decided."""
     destination: str
     reason: str = ""
     input: Any = None  # optional structured input for the destination
@@ -26,6 +27,7 @@ class RoutingDecision:
 
 @dataclass
 class RouteRequest:
+    """A request to route: the `input`, an optional explicit `agent`, capabilities the destination must have (`require`), and free-form `hints`."""
     input: Any
     agent: str | None = None  # explicit target
     require: frozenset[str] = frozenset()  # capabilities the destination must have
@@ -83,6 +85,11 @@ def llm_proposal(propose: Callable[[Any, list[AgentSpec]], Awaitable[Any] | Any]
 
 
 class Router:
+    """Picks an agent for a request and follows its handoffs. Strategies are tried in order (`explicit`, `rules`,
+    `by_capability`, `llm_proposal`); the first to decide wins. Every destination, including handoff targets
+    and model suggestions, is checked against the registry and the policy before it runs. Handoff loops and
+    more than `max_handoffs` hops raise `RoutingError`.
+    """
     def __init__(self, harness: Harness, registry: AgentRegistry, strategies: list[Strategy] | None = None, *,
                  default_agent: str | None = None, max_handoffs: int = 5, allow_revisit: bool = False):
         self.harness, self.registry = harness, registry
@@ -137,6 +144,7 @@ class Router:
                     "decisions": [d.__dict__ for d in decisions], "final_execution_id": res.execution_id}
 
     async def run(self, request: RouteRequest | Any, **kwargs: Any) -> ExecutionResult:
+        """Route `request` and run the chosen agent. The result's output has `output`, the `path` taken and the routing `decisions`."""
         if not isinstance(request, RouteRequest):
             request = RouteRequest(input=request)
         return await self.harness.run(ROUTER, request, **kwargs)

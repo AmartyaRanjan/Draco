@@ -12,6 +12,11 @@ from draco.core.errors import ConfigurationError
 
 
 class DracoSettings(BaseModel):
+    """Validated, immutable framework settings. Build one directly, or call `DracoSettings.from_env()` to read
+    `DRACO_<FIELD>` environment variables (`DRACO_DEFAULT_TIMEOUT_S`, `DRACO_STATE_PATH`, ...). Unknown fields
+    are rejected, and a bad value raises `ConfigurationError` naming the variable. Covers default budgets,
+    concurrency and rate limits, the state store, encryption, retention, tracing and redaction.
+    """
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     default_timeout_s: float | None = Field(default=120.0, gt=0)

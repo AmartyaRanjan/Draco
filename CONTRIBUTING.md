@@ -195,6 +195,32 @@ This project prefers precise statements over impressive ones. Documentation is p
 - **Update stale statements you find**, including in old docs. A wrong sentence is a bug.
 - Link with relative paths. Keep code samples runnable.
 
+### Writing documentation
+
+The documentation site lives in [`docs/`](docs/) and is built with MkDocs (`mkdocs.yml` is the table of contents). The pages follow four kinds, and each page should be only one of them: **tutorials** (learn by building), **how-to guides** (do one job), **concepts** (understand why) and **reference** (look it up). The Python API reference is generated from docstrings, so a public class or function needs a docstring that says what it does and when to use it.
+
+```bash
+pip install -e ".[docs]"
+mkdocs serve                  # live preview at http://127.0.0.1:8000
+mkdocs build --strict         # what CI runs: a broken link, anchor or reference fails
+```
+
+**Runnable examples are tested.** Put an HTML comment on the line before a Python block to have CI run it:
+
+````markdown
+<!-- doctest -->
+```python
+print("this program must exit 0")
+```
+
+<!-- output -->
+```text
+this program must exit 0
+```
+````
+
+`<!-- doctest -->` makes the block a complete program that must exit cleanly, and a following `<!-- output -->` block must match what it prints, exactly. Use `<!-- doctest requires=langgraph -->` for a block that needs an optional package (it is skipped where the package is absent). Keep examples self-contained and deterministic: print no ids, timings or paths. Blocks without a marker are illustrations and are not run. The check lives in `tests/draco/unit/test_docs_examples.py`.
+
 ## 10. Dependencies
 
 - Prefer the standard library. A new runtime dependency needs a stated reason in the pull request.
