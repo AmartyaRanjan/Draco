@@ -25,10 +25,9 @@
 ## Checklist
 
 - [ ] `python -m pytest tests/draco -q`, `ruff check src tests/draco examples` and `mypy src/draco` pass
-- [ ] `python -m unittest discover -s tests -t .` passes (if `app/` or its adapters changed)
 - [ ] If I touched framework code, I ran the lean subset (`pytest tests/draco/unit tests/draco/reliability`) in an environment with only `.[dev,providers]`
 - [ ] New or changed behaviour has tests; no test was weakened or deleted to pass
-- [ ] Docs updated (API guide, production.md, roadmap as needed) and an entry added to the changelog
+- [ ] Docs updated (API guide, roadmap as needed) and an entry added to the changelog
 - [ ] No secrets, `.env` files, databases, uploads or evaluation output are committed
 - [ ] No permission is widened and no new global request state is introduced (or I explain why above)
 - [ ] I have read [CONTRIBUTING.md](../CONTRIBUTING.md)

@@ -1,7 +1,7 @@
 """Provider-neutral retrieval contract with authorization applied before and after the backend call.
 
 Retrieval is optional: nothing in the core imports this module. A backend implements `Retriever`; the
-`app` RetrievalService is adapted in `app_retrieval`."""
+An application's own retrieval service is adapted on the application side (see draco-rag's `app.draco_adapters.retrieval`)."""
 from __future__ import annotations
 
 from collections.abc import Callable

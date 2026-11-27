@@ -5,7 +5,7 @@ Draco is a small Python execution harness for agent and RAG workloads. Anything 
 authorization, default-deny tool policy, budgets and rate limits, deadlines and cancellation, idempotency,
 redacted tracing, and durable state with resumable steps. The native framework depends only on `pydantic`.
 
-The repository also contains a starter application built on it: a FastAPI RAG and agent service
+[draco-rag](https://github.com/AmartyaRanjan/draco-rag) is an application built on it: a FastAPI RAG and agent service
 (hybrid retrieval with reranking, a tool-using LangGraph agent, human-approved ingestion, an evaluation suite).
 
 ## Start here
@@ -17,12 +17,8 @@ The repository also contains a starter application built on it: a FastAPI RAG an
 
 ## Status
 
-Early (version 0.1.0). The roadmap page separates *done*, *partial* and *planned*. The starter application is
-hardened for a single-tenant trust domain, not multi-tenant use. Evaluation results, the production runbook and
-the agent design notes live in the repository root: see
-[evals.md](https://github.com/AmartyaRanjan/Draco/blob/main/evals.md),
-[production.md](https://github.com/AmartyaRanjan/Draco/blob/main/production.md) and
-[tools.md](https://github.com/AmartyaRanjan/Draco/blob/main/tools.md).
+Early (version 0.1.0). The roadmap page separates *done*, *partial* and *planned*. The RAG service's evaluation
+results, production runbook and agent design notes are in [draco-rag](https://github.com/AmartyaRanjan/draco-rag).
 
 ## Source
 

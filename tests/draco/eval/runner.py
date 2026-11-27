@@ -2,8 +2,8 @@
 
 Everything here is deterministic: no model, no network, no randomness (nothing to seed). What it
 measures is the *runtime's* decisions (routing validation, tool authorization, termination
-semantics, RAG failure handling). It does not measure answer quality, which is provider-dependent
-and covered by the existing opt-in scripts/eval_*.py against a live stack.
+semantics). It does not measure answer quality, which is provider-dependent
+and belongs to the application built on Draco (for example draco-rag's eval scripts).
 
 Run:  PYTHONPATH=src:.:<site-packages> python -m tests.draco.eval.runner
 """
@@ -13,9 +13,7 @@ import asyncio
 import json
 import pathlib
 import sys
-import tempfile
 from typing import Any
-from unittest.mock import patch
 
 from pydantic import BaseModel
 
@@ -126,52 +124,7 @@ async def eval_termination(case: dict[str, Any]) -> list[str]:
     return errs
 
 
-# ---- rag ---------------------------------------------------------------------------------
-async def eval_rag(case: dict[str, Any]) -> list[str]:
-    from app.db import registry
-    from app.retrieval.context import TokenCounter
-    from app.retrieval.generator import GenerationResult, extract_citations
-    from app.retrieval.service import RetrievalService
-
-    from draco.adapters import rag_workload
-    from draco.core import DracoSettings
-    from draco.harness import Harness
-    from tests.test_retrieval import FakeReranker, FakeRetriever, cand, settings
-
-    def retr(spec, key, stage):
-        if spec == "fail": return FakeRetriever([], fail=True, stage=stage)
-        return FakeRetriever([cand(int(c[1:]), **{key + "_rank": i + 1, key + "_score": 1.0}) for i, c in enumerate(spec)], stage=stage)
-
-    class Gen:
-        async def generate(self, q, ctx, weak):
-            return GenerationResult("a [S1]", extract_citations("[S1]", ctx)[0], usage={"total_tokens": 1})
-    with tempfile.TemporaryDirectory() as tmp, patch.object(registry, "DB_PATH", pathlib.Path(tmp) / "documents.db"):
-        registry.init_db()
-        registry.create_document("d1", "d1.pdf", "/d1", "eval")
-        registry.update_status("d1", "completed")
-        svc = RetrievalService(
-            settings(), dense=retr(case["dense"], "dense", "q"), lexical=retr(case["lexical"], "bm25", "o"),
-            reranker=FakeReranker(), counter=TokenCounter(None),
-            generator=Gen() if case["generator"] else None, filename_lookup=lambda d: "f.pdf")
-        h = Harness(DracoSettings(default_timeout_s=5))
-        h.register("rag", rag_workload(svc))
-        r = await h.run("rag", case["query"], user_id="eval")
-    if "expect_error" in case:
-        return [] if r.error and r.error.code == case["expect_error"] else [f"error {r.error and r.error.code} != {case['expect_error']}"]
-    errs = [] if r.ok else [f"status {r.status.value}"]
-    if r.ok:
-        if r.output["abstained"] != case["expect_abstain"]:
-            errs.append(f"abstained {r.output['abstained']} != {case['expect_abstain']}")
-        if "expect_citation" in case and r.output["citations"][0]["chunk_id"] != case["expect_citation"]:
-            errs.append(f"citation {r.output['citations']}")
-        if "expect_degraded" in case and r.output["degraded"] != case["expect_degraded"]:
-            errs.append(f"degraded {r.output['degraded']}")
-        if r.output["trace"]["request_id"] != r.execution_id:
-            errs.append("request id != execution id")
-    return errs
-
-
-SUITES = {"routing": eval_routing, "tools": eval_tools, "termination": eval_termination, "rag": eval_rag}
+SUITES = {"routing": eval_routing, "tools": eval_tools, "termination": eval_termination}
 
 
 async def run_suite(name: str) -> dict[str, Any]:

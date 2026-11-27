@@ -15,10 +15,9 @@ Draco is maintained by volunteers. This page says where to take what, so your qu
 
 Most questions are answered in the docs. Start with the [documentation index](docs/README.md):
 
-- [README](README.md): what Draco is, install, quick start, HTTP API.
+- [README](README.md): what Draco is, install, quick start.
 - [docs/api-guide.md](docs/api-guide.md): the framework's API and security model.
 - [docs/extension-guide.md](docs/extension-guide.md): plugins, hooks, tools, adapters.
-- [production.md](production.md): configuration, operations runbook, known gaps.
 - [examples/](examples/): runnable examples (`PYTHONPATH=src:. python -m examples.a_simple`).
 
 ## A good bug report

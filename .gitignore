@@ -4,6 +4,8 @@
 __pycache__/
 *.py[cod]
 documents/
+# Runtime data from when the RAG app lived here (now AmartyaRanjan/draco-rag). Old checkouts may still
+# hold these untracked files; keep them ignored so they are never committed.
 app/storage/uploads/
 app/storage/*.db
 app/storage/*.db-*

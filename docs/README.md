@@ -6,7 +6,7 @@ Where to find things. Documents are grouped by what you are trying to do. Dates 
 
 | Document | What it is |
 |---|---|
-| [README](../README.md) | What Draco is, architecture, install, quick start, HTTP API, status and known limitations |
+| [README](../README.md) | What Draco is, architecture, install, quick start, status and known limitations |
 | [PROJECT_OVERVIEW](PROJECT_OVERVIEW.md) | Purpose, what is built, design principles, and the package plan |
 | [Roadmap](architecture/roadmap.md) | What is done, partial and planned, in priority order |
 
@@ -14,39 +14,28 @@ Where to find things. Documents are grouped by what you are trying to do. Dates 
 
 | Document | What it is |
 |---|---|
-| [api-guide](api-guide.md) | The framework API: harness, contracts, agents, tools, security model, adapters, observability, plus the starter app's HTTP additions |
+| [api-guide](api-guide.md) | The framework API: harness, contracts, agents, tools, security model, adapters, observability |
 | [extension-guide](extension-guide.md) | Plugins, hooks, tools, providers and stores: extending Draco without editing its source |
 | [DRACO_CHANGELOG](DRACO_CHANGELOG.md) | Framework changes by version, with what is verified and what is still open |
 | [`examples/`](../examples) | Runnable examples (`PYTHONPATH=src:. python -m examples.a_simple`); they also run as tests |
 
-## Running the starter app (`app/`)
+## The RAG service
+
+The FastAPI RAG and agent service that used to live here as the starter app (`app/`) is now its own repository, [draco-rag](https://github.com/AmartyaRanjan/draco-rag). Its runbook (`production.md`), agent notes (`tools.md`), evaluation (`evals.md`), retrieval and inference logs, production audit, document-ownership guide, ingestion map, changelog and deployment files moved with it.
+
+## Project history
 
 | Document | What it is |
 |---|---|
-| [production.md](../production.md) | Configuration reference, operations runbook, alerts, backups and the **known gaps** list |
-| [tools.md](../tools.md) | The hierarchical agent and tool layer: capabilities, limits, risks and next steps |
-| [DOCUMENT_OWNERSHIP](DOCUMENT_OWNERSHIP.md) | Per-user document ownership and migrating legacy rows |
-| [CHANGELOG](../CHANGELOG.md) | Starter-app and ingestion changes, iteration by iteration |
-| [`deploy/`](../deploy) | vLLM, ingestion-worker and maintenance deployment files |
-
-## Evidence: how it was measured
-
-| Document | What it is |
-|---|---|
-| [evals.md](../evals.md) | RAG and agent evaluation: datasets, metrics, results and their limits |
-| [RETRIEVAL_LOG](../RETRIEVAL_LOG.md) | How the retrieval pipeline was built and tuned |
-| [INFERENCE_LOG](../INFERENCE_LOG.md) | The inference layer: vLLM serving, conversation memory, measured behaviour |
 | [IMPLEMENTATION_LOG](IMPLEMENTATION_LOG.md) | Implementation log and verification matrix for the framework |
 | [Current state](architecture/current-state.md) | The audit of the repository before the framework was added, and later updates |
 | [Reference study](architecture/reference-lessons.md) | Lessons taken from other agent frameworks and the decisions made |
-| [`ingestion-map.html`](ingestion-map.html) | Visual map of the ingestion pipeline |
 
 ## Security and operations
 
 | Document | What it is |
 |---|---|
 | [SECURITY](../SECURITY.md) | How to report a vulnerability, scope, and known limitations |
-| [PRODUCTION_AUDIT](../PRODUCTION_AUDIT.md) | A production bug audit and its findings |
 | [HISTORY_PURGE](HISTORY_PURGE.md) | Runbook for removing runtime data from Git history |
 
 ## Contributing and community
