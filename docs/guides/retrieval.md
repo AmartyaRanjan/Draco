@@ -45,7 +45,7 @@ def owned(doc_id):
 With it, the adapter authorizes `document.read` for every document the request names (before the search) and for every document the search **returned** (after it), dropping and auditing anything the caller may not read. The second check is the important one: shared indexes over-return, so a result list is never trusted to be pre-filtered.
 
 !!! warning "Without `document_resource`, an identified caller is denied"
-    If a run has an identity but you gave no `document_resource`, access to documents is **denied** with "document access cannot be verified", not allowed. The adapter fails closed, so forgetting this configuration cannot silently expose data.
+    If a run has an identity but you gave no `document_resource`, access to documents is **denied** with "document access cannot be verified", not allowed. The denial happens immediately when the request names documents, and otherwise **after** the search, if the backend returns any evidence (a query that returns nothing succeeds). Either way no evidence is returned, so forgetting this configuration cannot silently expose data.
 
 ## Example: one shared index, two tenants
 
@@ -100,7 +100,7 @@ Line by line:
 1. Alice searched with no document filter. The index returned a chunk from each tenant, and the adapter kept only Acme's.
 2. The `retrieval.after` event says one chunk was selected and **one was withheld**, so you can alert on unexpected withholding.
 3. Alice named Globex's document explicitly. The request was denied **before** the search ran.
-4. With no `document_resource`, the identified caller is refused outright.
+4. With no `document_resource`, the identified caller is refused as soon as the backend returns evidence.
 
 ## Ingestion
 

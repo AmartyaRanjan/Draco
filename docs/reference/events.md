@@ -1,6 +1,6 @@
 # Events
 
-Everything that happens in a run is an **event** on one bus. The tracer records them, the store saves them, exporters ship them, and your hooks can react to them.
+Everything that happens in a run is an **event** on one bus. (Plugin events carry no execution id, so they are not stored per execution.) The tracer records them, the store saves them, exporters ship them, and your hooks can react to them.
 
 An `Event` has a `name`, the ids it belongs to (`execution_id`, `parent_execution_id`, `correlation_id`), a `data` dict and a timestamp `ts`. The `data` you see in a trace or a store is already [redacted](../concepts/observability.md).
 
@@ -9,7 +9,7 @@ An `Event` has a `name`, the ids it belongs to (`execution_id`, `parent_executio
 `h.on(pattern, handler, critical=False)` subscribes to events. The pattern is an exact name, a prefix ending in `*` such as `tool.*`, or `*` for everything. It returns a function that unsubscribes. A handler may be sync or async.
 
 - **Normal handlers** observe. If one raises, the error is recorded (`bus.handler_errors`) and the run continues.
-- **Critical handlers** (`critical=True`) enforce. They run before normal handlers, and raising `PolicyViolation` from one on `execution.started` or `tool.before` stops the run or the tool call.
+- **Critical handlers** (`critical=True`) enforce. They run before normal handlers, and an exception from one (normally `PolicyViolation`) on `execution.started`, `tool.before` or `model.before` stops the run, the tool call or the model call.
 
 <!-- doctest -->
 ```python
@@ -47,7 +47,7 @@ Your own code can add events with `emit(ctx, name, **data)` from `draco.harness`
 | `execution.resumed` | A resumed run begins (instead of `started`) | same as `started` |
 | `execution.replayed` | An idempotency key returned a saved result | `key_reused` |
 | `execution.failed`, `execution.cancelled`, `execution.timeout`, `execution.budget_exhausted` | A run ends with that status, just before `finished` | same as `finished` |
-| `execution.finished` | Every run, last | `status`, `agent_id`, `target`, `error_code`, `usage` |
+| `execution.finished` | Every run that was started or resumed, last. A replayed idempotent result, or a failure while building the context, emits no `finished`. | `status`, `agent_id`, `target`, `error_code`, `usage` |
 | `handoff` | A workload returned a `Handoff` | `destination`, `reason` |
 | `persistence.failed` | Saving the final record failed | `error` |
 
@@ -65,7 +65,7 @@ Your own code can add events with `emit(ctx, name, **data)` from `draco.harness`
 | Event | Emitted | Data |
 |---|---|---|
 | `tool.before` | The call passed the policy and authorizer (a critical handler may veto) | `tool`, `purpose`, `group`, `mutates_state` |
-| `tool.after` | The call finished, whatever the result | `tool`, `status`, `group`, `retries`, `duration_ms`, `output_chars`, `error_code`, `untrusted`, `injection_suspected`, `args` (the argument **names** only) |
+| `tool.after` | A call that passed the checks finished, with a success, error or timeout result. Not emitted for refused calls (see `tool.denied`), or when the budget, the deadline or a cancellation ends the run. | `tool`, `status`, `group`, `retries`, `duration_ms`, `output_chars`, `error_code`, `untrusted`, `injection_suspected`, `args` (the first 20 argument **names** for dict arguments, never values) |
 | `tool.denied` | The tool is unknown, or the policy or authorizer refused it | `tool`, `reason` |
 
 ## Steps and routing
@@ -82,7 +82,7 @@ Your own code can add events with `emit(ctx, name, **data)` from `draco.harness`
 
 | Event | Emitted | Data |
 |---|---|---|
-| `security.allowed`, `security.denied` | An authorizer decision | `action`, `resource_kind`, `resource_id`, `resource_tenant`, `reason`, `subject`. Identifiers are pseudonymised. Never payloads. |
+| `security.allowed`, `security.denied` | An authorizer decision | `action`, `resource_kind`, `resource_id`, `resource_tenant`, `reason`, `subject`. With the default settings `subject` and `resource_tenant` are pseudonymised, while `resource_id` (a tool name, a document id) is recorded as given. Never payloads. |
 | `retrieval.after` | A retrieval workload finished | `selected`, `withheld`, `degraded` |
 
 ## Plugins

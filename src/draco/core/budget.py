@@ -15,7 +15,8 @@ class BudgetLimits:
     `budget_exhausted` and the resource name in the error details.
 
     `max_model_calls`, `max_tool_calls`, `max_retries` and `max_tokens` are counts; `max_duration_s` is
-    wall-clock seconds; `max_depth` bounds nesting of child executions; `max_concurrency` bounds parallel work.
+    wall-clock seconds (exceeding it ends the run as `timeout`); `max_depth` bounds nesting of child executions.
+    `max_concurrency` is accepted but not enforced here: use `DracoSettings.max_concurrency` to bound parallel runs.
     """
     max_model_calls: int | None = None
     max_tool_calls: int | None = None

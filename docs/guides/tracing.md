@@ -9,7 +9,7 @@ An exporter that raises can never break a run: the failure is recorded and the r
 
 ## To a file
 
-`JsonlExporter(path)` appends one JSON object per event. You can also switch it on without code by setting `DRACO_TRACE_PATH`.
+`JsonlExporter(path)` appends one JSON object per event. You can also set `DRACO_TRACE_PATH`, as long as you build the harness from `DracoSettings.from_env()` (a bare `Harness()` does not read the environment) and do not pass your own `exporters=` list, which takes precedence.
 
 Each record has `event`, `ts`, `execution_id`, `parent_execution_id`, `correlation_id` and a redacted `data` dict. That is enough to rebuild any run, and to group a whole request by `correlation_id`.
 
@@ -66,7 +66,7 @@ The user id in the file is the pseudonym, not `alice`. Redaction happens before 
 
 ## To OpenTelemetry
 
-`OtelExporter` turns each execution into **one span**, parented by Draco's parent and child relationship, and attaches the lifecycle, tool and model events to it as span events. It is an exporter for the existing tracer, not a second tracing system, so what you see in OpenTelemetry is exactly the redacted trace.
+`OtelExporter` turns each execution into **one span**, parented by Draco's parent and child relationship, and attaches the lifecycle, tool and model events to it as span events. It is an exporter for the existing tracer, not a second tracing system, so what you see in OpenTelemetry comes from the same redacted trace. Only simple values (strings, numbers, booleans) become span-event attributes; nested data such as `usage` is left out.
 
 ```bash
 pip install "draco-harness[otel]"
@@ -118,7 +118,7 @@ A run that does not end `completed`, `handoff` or `waiting` marks its span as an
 
 ## Persisted events
 
-Separately from exporters, the harness saves each event, redacted, to the **store** (`h.store.list_events(execution_id)`). They live as long as your [retention settings](persistence.md) allow, and survive a restart if the store does. Use them for history; use exporters for live monitoring.
+Separately from exporters, the harness saves each event that belongs to an execution, redacted, to the **store** (`h.store.list_events(execution_id)`). They live as long as your [retention settings](persistence.md) allow, and survive a restart if the store does. Use them for history; use exporters for live monitoring.
 
 ## See also
 

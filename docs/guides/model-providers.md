@@ -57,7 +57,7 @@ Both need `pip install "draco-harness[providers]"` (they use `httpx`).
 | `OpenAICompatProvider(base_url, api_key=Secret(...), model=...)` | OpenAI, vLLM, llama.cpp server, and anything else speaking the chat-completions API. `base_url` includes the version prefix, such as `https://host/v1`. |
 | `AnthropicProvider(Secret(...), model=...)` | The Anthropic Messages API |
 
-API keys are `Secret` values, so they never appear in logs, reprs or traces. Both providers map HTTP failures to `ProviderError`: **429 and 5xx and timeouts are retryable, other 4xx are not**, and the error message **never includes the response body**, which could echo back a key or an internal detail.
+API keys are `Secret` values, so they never appear in logs, reprs or traces. Both providers map HTTP failures to `ProviderError`: **HTTP 408, 409, 425, 429, 500, 502, 503, 504 and 529, and timeouts, are retryable; other statuses are not**, and the error message **never includes the response body**, which could echo back a key or an internal detail.
 
 You can pass your own `httpx.AsyncClient` as `client=` to control transport, proxies or testing. The example below uses that to run a real provider against a fake server, so it works offline:
 
@@ -115,7 +115,7 @@ budget_exhausted budget {'resource': 'tokens', 'limit': 10}
 What happened: the first request got a 429, which the provider reported as a retryable `ProviderError` (`model.failed`); `call_with_retry` retried; the second request succeeded with 15 tokens. That cost two model calls and one retry. In the second run, 15 tokens exceeded `max_tokens=10`, so the run ended `budget_exhausted`.
 
 !!! note "The token limit is checked when usage is reported"
-    A provider reports tokens after the call finishes, so the call that crosses `max_tokens` has already happened. The limit stops the **next** step, not the one in flight. For a hard per-call cap, also pass the provider a `max_tokens` parameter in `ModelRequest.params`.
+    A provider reports tokens after the call finishes, so the call that crosses `max_tokens` has already happened and cost what it cost. Draco then ends the run as `budget_exhausted` and discards that response; the crossing call's tokens are not added to the run's usage. For a hard per-call cap, also pass the provider a `max_tokens` parameter in `ModelRequest.params`.
 
 ## Your own provider
 

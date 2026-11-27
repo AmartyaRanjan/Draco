@@ -17,7 +17,7 @@ h.tracer.tree(root_execution_id) # the run and its descendants as nested dicts
 
 The tracer cleans every event **before** it is stored, exported or returned:
 
-- **Secret-looking keys.** Any key whose name contains `key`, `token`, `password`, `secret` or `authorization` has its value replaced with `<redacted>`.
+- **Secret-looking keys.** Any key whose name **contains** `key`, `token`, `password`, `secret` or `authorization` (in any case) has its value replaced with `<redacted>`. The match is on a substring, so it also catches harmless names: with the default settings the `tokens` count on `model.after` and in `usage` appears as `<redacted>`, and so does `key_reused`. If you want token counts in your traces, change `redact_keys` (`DRACO_REDACT_KEYS`), for example to `secret,password,authorization,api_key,access_token`.
 - **Secret-looking strings.** `Bearer ...` tokens and `sk-...` keys inside text are replaced.
 - **Personal identifiers.** `user_id`, `tenant_id`, `subject` and `resource_tenant` are replaced with a stable hash such as `id:2bd806c97f0e`. The same user always gets the same hash, so you can still count and correlate per user without storing the raw id.
 - **Size.** Long strings are truncated (default 2000 characters) and large collections are capped.

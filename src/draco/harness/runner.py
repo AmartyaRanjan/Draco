@@ -202,13 +202,15 @@ class Harness:
         rec = await self.store.get_execution(execution_id)
         if rec is None:
             raise ContractError(f"unknown execution '{execution_id}'")
+        # Checked before the status: a caller from another tenant must get the same answer as for a missing id,
+        # not "completed" or "still running", which would reveal that the execution exists and what state it is in.
+        if rec.tenant_id is not None and (identity is None or identity.tenant_id != rec.tenant_id):
+            raise ContractError(f"unknown execution '{execution_id}'")
         if rec.status not in _RESUMABLE:
             raise ContractError(f"execution '{execution_id}' is {rec.status} and cannot be resumed")
         if execution_id in self._inflight:
             raise ContractError(f"execution '{execution_id}' is still running")
         timeout = timeout_s if timeout_s is not None else self.settings.default_timeout_s
-        if rec.tenant_id is not None and (identity is None or identity.tenant_id != rec.tenant_id):
-            raise ContractError(f"unknown execution '{execution_id}'")  # same answer as a missing id: no cross-tenant probing
         stored = Policy.from_dict(rec.policy) if rec.policy is not None else None
         if stored is not None and policy is not None and not policy.narrows(stored):
             raise PolicyViolation("resume cannot widen the policy the execution started under")

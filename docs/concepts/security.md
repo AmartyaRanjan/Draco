@@ -16,7 +16,7 @@ They stack. A tool call must pass the policy **and** the authorizer, and a tool 
 
 **Identity is the only trusted caller record.** `Identity(subject, tenant_id, roles)` rejects empty or placeholder values such as `anonymous`, `guest` or `*`. Given an identity, `user_id` and `tenant_id` are derived from it, and a contradicting `user_id=` or `tenant_id=` fails the run. Children inherit it, cannot replace it, cannot change user or tenant, and cannot carry trusted field names in `metadata`.
 
-**Tool access is default-deny.** With no `allowed_tools`, a run can use no tools and sees none. `denied_tools`, permissions and approval requirements are checked again at execution time, so reaching a handler any other way does not bypass them.
+**Tool access is default-deny.** With no `allowed_tools`, a run can use no tools and sees none. For tools created with `native_tool`, `denied_tools`, permissions and approval requirements are checked again inside the tool's own wrapper, so reaching a handler without going through `ToolRuntime.call` does not bypass them. A hand-built `Tool(...)` or an MCP tool does not carry that second check, so call those only through `ToolRuntime`.
 
 **Children can only narrow.** A child run's `Policy` must grant nothing its parent does not. The same applies to `resume`: it restores the policy the run started under and refuses a more permissive one.
 
@@ -31,11 +31,11 @@ They stack. A tool call must pass the policy **and** the authorizer, and a tool 
 | `document.read` | Before **and after** retrieval, because shared indexes over-return |
 | `document.ingest` | Before ingestion |
 
-The default `RoleAuthorizer` applies tenant isolation first: a tenant-scoped `Resource` is reachable only from the same tenant, and no identity means denial. Then, if you gave it a grant table, it checks roles. Any exception inside an authorizer, or a malformed decision, counts as a **denial**.
+The default `RoleAuthorizer` applies tenant isolation first: a tenant-scoped `Resource` is reachable only from the same tenant, and a missing identity is denied for tenant-scoped resources and for everything when `require_identity` is on or a grant table is configured. Then, if you gave it a grant table, it checks roles. Any exception inside an authorizer, or a malformed decision, counts as a **denial**.
 
 **Persistence is tenant-aware.** Idempotency keys live in a per-tenant namespace. `resume()` and `cancel()` of another tenant's execution behave as if the execution does not exist, so ids cannot be probed.
 
-**Every decision is audited.** Each check emits `security.allowed` or `security.denied` with ids and a reason. `subject`, `user_id`, `tenant_id` and `resource_tenant` are pseudonymised in traces, and secrets are redacted ([tracing and redaction](observability.md)).
+**Authorizer decisions are audited.** Each authorizer check emits `security.allowed` or `security.denied` with ids and a reason. Refusals by the `Policy` (a tool that is not allowed, a missing permission) show up as `tool.denied` events instead, and guardrail refusals are not audited. `subject`, `user_id`, `tenant_id` and `resource_tenant` are pseudonymised in traces, and secrets are redacted ([tracing and redaction](observability.md)).
 
 **Secrets never print.** `Secret` hides its value from `repr`, `str`, logging and JSON encoding, and refuses to be pickled. Reading it takes an explicit `.reveal()`.
 
@@ -47,7 +47,7 @@ The default `RoleAuthorizer` applies tenant isolation first: a tenant-scoped `Re
 - **Authenticate.** Without an `identity=`, `user_id` and `tenant_id` are plain strings from a trusted in-process caller. They prove nothing.
 - **Turn on `require_identity` for multi-tenant use.** The default `RoleAuthorizer()` with no grants allows runs that have no identity, which suits a single-tenant deployment only. Set `require_identity=True` (or `DRACO_REQUIRE_IDENTITY`), or configure grants, and a missing identity is denied.
 - **Authorize resources named by tool arguments.** Arguments come from a model and are untrusted. Inside the handler, call `authorize(ctx, action, Resource(...))`. See the [multi-tenant tutorial](../tutorials/multi-tenant.md).
-- **Give retrieval and ingestion a document resolver.** Pass `document_resource=lambda doc_id: Resource("document", doc_id, tenant_id=...)` to the adapters. With an identity and no resolver, document access is **denied**, not allowed.
+- **Give retrieval and ingestion a document resolver.** Pass `document_resource=lambda doc_id: Resource("document", doc_id, tenant_id=...)` to the adapters. With an identity and no resolver, document access is **denied**, not allowed: immediately when documents are named in the request, and after the search when the backend returns evidence.
 - **Share the rate limiter** if more than one process serves a tenant. The built-in one is per process ([rate limits](../guides/rate-limits.md)).
 - **Encrypt state at rest** if the store holds sensitive inputs and outputs ([persistence](../guides/persistence.md)). Execution inputs and outputs are stored as given, because resume needs them.
 

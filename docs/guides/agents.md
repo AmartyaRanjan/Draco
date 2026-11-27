@@ -52,7 +52,7 @@ An agent can also **delegate**: `await router.delegate(ctx, "auditor", data)` ru
 
 - **Every destination is validated before it runs**: a name in a handoff, a model's suggestion, an explicit request. An unknown name is a `routing` error and never executes.
 - **The policy's `allowed_agents` is enforced**: pass `Policy(allowed_agents=frozenset({...}))` and any other destination is denied, whichever strategy chose it.
-- **Handoff loops are caught.** Going back to an agent already on the path raises `RoutingError`, unless you create the router with `allow_revisit=True`. More than `max_handoffs` hops (default 5) also raises it.
+- **Handoff loops are caught.** Going back to an agent already on the path raises `RoutingError`, unless you create the router with `allow_revisit=True`. More than `max_handoffs` handoffs after the first agent (default 5, so up to six agents in one chain) also raises it.
 - **Runs nest under one execution tree**, sharing the budget and identity, so an agent cannot get more resources by calling more agents.
 
 ## Example

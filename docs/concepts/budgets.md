@@ -13,8 +13,7 @@ A `BudgetLimits` sets the ceilings. Every field is optional (`None` is unlimited
 | `max_tool_calls` | Tool calls | Each `ToolRuntime.call` that gets past the policy checks |
 | `max_retries` | Retries | Each retry made by `call_with_retry` |
 | `max_depth` | Nesting of child runs | Each `h.run(..., parent=ctx)` |
-| `max_duration_s` | Wall-clock seconds | Checked continuously; also bounds the deadline |
-| `max_concurrency` | Parallel work | Applied by the harness |
+| `max_duration_s` | Wall-clock seconds | Bounds the run's deadline. Exceeding it ends the run as `timeout`. |
 
 All values must be positive. Pass limits per run (`h.run(..., limits=BudgetLimits(...))`) or set defaults for every run on `DracoSettings` (`max_model_calls`, `max_tool_calls`, `max_tokens`, ... or `DRACO_MAX_MODEL_CALLS` and friends).
 
@@ -24,7 +23,9 @@ A run and all of its children draw from **one** `BudgetTracker`. If a parent spa
 
 ## What happens at the limit
 
-Hitting a limit ends the **whole run** with status `budget_exhausted`. The error's `details` name the resource and the limit:
+Hitting a limit ends the **whole run** with status `budget_exhausted`. The error's `details` name the resource and the limit. (The one exception is time: a run that exceeds `max_duration_s` or its deadline ends as `timeout`, see below.)
+
+
 
 <!-- doctest -->
 ```python
@@ -103,7 +104,7 @@ If you know the execution id instead (for example from the `execution.started` e
 
 Budgets bound one run. Two more limits bound how many runs start:
 
-- **Concurrency.** `DracoSettings.max_concurrency` bounds root runs in flight; `max_concurrency_per_tenant` bounds one tenant's. Beyond the cap, runs are **rejected** with `budget_exhausted` (resource `tenant_concurrency`), not queued.
+- **Concurrency.** `DracoSettings.max_concurrency` bounds top-level runs executing at once in this process; extra runs **wait** for a free slot, and the wait counts against their deadline. `max_concurrency_per_tenant` bounds one tenant's runs in flight; beyond it, runs are **rejected** with `budget_exhausted` (resource `tenant_concurrency`), not queued.
 - **Rate limits.** Per-tenant and per-user token buckets. See [rate-limit tenants and users](../guides/rate-limits.md).
 
 ## Next

@@ -26,7 +26,7 @@ Every Draco error is a `DracoError` with a stable `code`, a `message`, a `retrya
 | `ContractError` | `contract` | no | Input or output failed validation, a name is registered twice, or `resume` is called on a run that cannot be resumed. |
 | `RoutingError` | `routing` | no | Unknown workload or agent, no route found, a handoff loop, or too many hops. |
 | `ToolError` | `tool` | no | A category for your own code. Draco itself reports tool failures as `ToolResult`s, not as this exception. |
-| `ProviderError` | `provider` | set per error | A model or backend call failed. 429, 5xx and timeouts are retryable; other 4xx are not. |
+| `ProviderError` | `provider` | set per error | A model or backend call failed. For the shipped HTTP providers, statuses 408, 409, 425, 429, 500, 502, 503, 504 and 529, and timeouts, are retryable; other statuses are not. |
 | `PolicyViolation` | `policy` | no | Denied by the policy, the authorizer, tenant isolation or a guardrail. |
 | `ApprovalRequired` | `policy` | no | A subclass of `PolicyViolation`: allowed only with an approval the policy does not grant. |
 | `ExecutionTimeout` | `timeout` | **yes** | The deadline passed. |
@@ -39,7 +39,7 @@ Every Draco error is a `DracoError` with a stable `code`, a `message`, a `retrya
 
 Any exception that is **not** a `DracoError` becomes `unexpected error (TypeName)` with code `internal` and `retryable=False`. The text of the original exception is not exposed.
 
-`BudgetExhausted.details["resource"]` is one of `model_calls`, `tool_calls`, `tokens`, `retries`, `depth`, `duration`, `tenant_concurrency`, `tenant_rate`, `user_rate` or `graph_steps`.
+`BudgetExhausted.details["resource"]` is one of `model_calls`, `tool_calls`, `tokens`, `retries`, `depth`, `tenant_concurrency`, `tenant_rate`, `user_rate` or `graph_steps`. Running out of time ends a run as `timeout`, not as `budget_exhausted`.
 
 ### Re-raising a result
 

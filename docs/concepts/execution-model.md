@@ -12,13 +12,13 @@ Your workload's first argument is an `ExecutionContext`. It is immutable and car
 | `parent_execution_id`, `depth` | Where this run sits in a tree of nested runs. |
 | `session_id` | A grouping id you choose, such as a chat session. Children inherit it. |
 | `agent_id` | The name of the workload or agent. |
-| `identity`, `user_id`, `tenant_id` | The trusted caller. `user_id` and `tenant_id` are derived from `identity`. |
+| `identity`, `user_id`, `tenant_id` | The trusted caller. When an identity is given, `user_id` and `tenant_id` are derived from it; without one they are the caller's own unauthenticated values. |
 | `correlation_id` | One id shared by a run and all its descendants, for tying logs together. |
 | `policy` | What this run may do: [tools, permissions, agents](security.md). |
 | `budget` | The shared [counters and limits](budgets.md). |
 | `cancel`, `deadline` | The cancellation token and the time limit. |
 | `services` | The harness's service registry (events, store, tracer, authorizer, plugin services). |
-| `metadata` | A dict for **your** per-request data. |
+| `metadata` | A dict for **your** per-request data. The context itself is immutable, but this dict is mutable. |
 
 Two rules follow from this design:
 

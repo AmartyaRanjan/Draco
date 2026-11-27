@@ -2,7 +2,7 @@
 
 [Budgets](../concepts/budgets.md) bound what **one run** may use. Rate limits and concurrency caps bound **how many runs start**, so one noisy tenant cannot starve the others. This guide covers the three controls and how to share them across processes.
 
-All of them apply to **top-level runs** only (not nested child runs), and all of them **reject** a run that is over the limit rather than queuing it. A rejected run ends as `budget_exhausted` with a `retryable` error, and nothing of your workload has run.
+All of them apply to **top-level runs** only (not nested child runs), and all of them **reject** a run that is over the limit rather than queuing it (the separate global `max_concurrency` limit, by contrast, makes extra runs wait). A rejected run ends as `budget_exhausted`, and nothing of your workload has run. A rate-limit refusal is retryable; a concurrency refusal is not.
 
 ## The three controls
 
@@ -12,9 +12,9 @@ All of them apply to **top-level runs** only (not nested child runs), and all of
 | User rate | `user_rate_per_minute`, `user_rate_burst` | `DRACO_USER_RATE_PER_MINUTE`, `DRACO_USER_RATE_BURST` | Runs started per minute by one user within a tenant |
 | Tenant concurrency | `max_concurrency_per_tenant` | `DRACO_MAX_CONCURRENCY_PER_TENANT` | Runs of one tenant in flight at the same time |
 
-The rates are **token buckets**: the bucket holds up to `burst` runs, and refills at `per_minute / 60` per second. A burst lets a tenant fire a few runs at once after being idle; the rate caps the sustained pace. If you give no burst, it defaults to the per-minute rate (at least 1).
+The rates are **token buckets**: the bucket holds up to `burst` runs, and refills at `per_minute / 60` per second. A burst lets a tenant fire a few runs at once after being idle; the rate caps the sustained pace. If you give no burst, it defaults to the per-minute rate rounded down (at least 1).
 
-Limits are keyed by the run's **identity**. A run with no tenant skips the tenant limits, and a run with no user skips the user limit, so combine rate limits with `require_identity` ([security model](../concepts/security.md)).
+Limits are keyed by the run's `tenant_id` and `user_id`, which come from its identity (or from plain `tenant_id=` and `user_id=` arguments if you pass no identity). A run with no tenant skips the tenant limits, and a run with no user skips the user limit, so combine rate limits with `require_identity` ([security model](../concepts/security.md)).
 
 ## Example
 

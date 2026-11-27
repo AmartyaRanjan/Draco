@@ -10,7 +10,7 @@ settings = DracoSettings.from_env()                                    # from DR
 h = Harness(settings)
 ```
 
-`from_env()` reads one variable per field, named `DRACO_` plus the upper-cased field name. An empty variable counts as unset. Unknown fields are rejected, and an invalid value raises `ConfigurationError` that **names the variable**, for example `DRACO_MAX_TOOL_CALLS: Input should be greater than 0`.
+`from_env()` reads one variable per field, named `DRACO_` plus the upper-cased field name. An empty variable counts as unset. Unknown constructor arguments are rejected (unknown environment variables are ignored), and an invalid value raises `ConfigurationError` that **names the variable**, for example `DRACO_MAX_TOOL_CALLS: Input should be greater than 0`.
 
 `Harness()` with no arguments uses `DracoSettings()` (the defaults below), **not** the environment. Call `from_env()` yourself if you want environment configuration.
 
@@ -26,7 +26,7 @@ Counts and durations must be positive. List-valued settings are comma-separated 
 | `max_tokens` | `DRACO_MAX_TOKENS` | none | Tokens per run, as reported by providers |
 | `max_retries` | `DRACO_MAX_RETRIES` | none | Retries per run |
 | `max_depth` | `DRACO_MAX_DEPTH` | `8` | Nesting of child runs |
-| `max_concurrency` | `DRACO_MAX_CONCURRENCY` | `8` | Top-level runs executing at once in this process |
+| `max_concurrency` | `DRACO_MAX_CONCURRENCY` | `8` | Top-level runs executing at once in this process. Extra runs wait for a slot. |
 
 These become the default `BudgetLimits` for every run. Pass `limits=` to `run` to override them for one run. See [budgets and limits](../concepts/budgets.md).
 
@@ -36,9 +36,9 @@ These become the default `BudgetLimits` for every run. Pass `limits=` to `run` t
 |---|---|---|---|
 | `max_concurrency_per_tenant` | `DRACO_MAX_CONCURRENCY_PER_TENANT` | none | Top-level runs in flight for one tenant. Excess runs are rejected. |
 | `tenant_rate_per_minute` | `DRACO_TENANT_RATE_PER_MINUTE` | none | Sustained runs per minute per tenant |
-| `tenant_rate_burst` | `DRACO_TENANT_RATE_BURST` | the rate (at least 1) | Bucket size for the tenant limit |
+| `tenant_rate_burst` | `DRACO_TENANT_RATE_BURST` | the rate rounded down (at least 1) | Bucket size for the tenant limit |
 | `user_rate_per_minute` | `DRACO_USER_RATE_PER_MINUTE` | none | Sustained runs per minute per user within a tenant |
-| `user_rate_burst` | `DRACO_USER_RATE_BURST` | the rate (at least 1) | Bucket size for the user limit |
+| `user_rate_burst` | `DRACO_USER_RATE_BURST` | the rate rounded down (at least 1) | Bucket size for the user limit |
 
 See [rate-limit tenants and users](../guides/rate-limits.md).
 
@@ -66,8 +66,8 @@ See the [security model](../concepts/security.md).
 
 | Field | Environment variable | Default | Meaning |
 |---|---|---|---|
-| `trace_path` | `DRACO_TRACE_PATH` | none | Append a JSONL trace to this file |
-| `redact_keys` | `DRACO_REDACT_KEYS` | `key, token, password, secret, authorization` | Event keys containing any of these words are replaced with `<redacted>` |
+| `trace_path` | `DRACO_TRACE_PATH` | none | Append a JSONL trace to this file. Used only when the harness is built without an explicit `exporters=` list. |
+| `redact_keys` | `DRACO_REDACT_KEYS` | `key, token, password, secret, authorization` | Event keys **containing** any of these words are replaced with `<redacted>`. That includes `tokens` and `key_reused`; see [tracing and redaction](../concepts/observability.md). |
 | `pii_keys` | `DRACO_PII_KEYS` | `user_id, tenant_id, subject, resource_tenant` | Event keys whose values are replaced by a stable hash |
 | `max_payload_chars` | `DRACO_MAX_PAYLOAD_CHARS` | `2000` | Longer strings in events are truncated |
 

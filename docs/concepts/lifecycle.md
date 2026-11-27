@@ -18,20 +18,20 @@ flowchart TD
     classDef yours stroke-width:3px
 ```
 
-A refusal at steps 2 to 7, or a failure at step 8 or 9, skips straight to step 10: the run is saved with the status and error that say why, and `run` returns it. Two exceptions: a problem building the context (step 1, such as a `tenant_id` that contradicts the identity) returns a failed result straight away without saving a record, and a replayed result (step 3) is returned as it was saved. Your workload (the thick box) is entered only if steps 1 to 7 all passed.
+A refusal at steps 2 to 7, or a failure at step 8 or 9, skips straight to step 10: the run is saved with the status and error that say why, and `run` returns it. Two exceptions: a problem building the context (step 1, such as a `tenant_id` that contradicts the identity, or exceeding `max_depth` in a child run) returns a non-completed result (`failed`, or `budget_exhausted` for depth) straight away without saving a record, and a replayed result (step 3) is returned as it was saved. Your workload (the thick box) is entered only if steps 1 to 7 all passed.
 
 ## The steps
 
 1. **Build the context.** The harness creates an [`ExecutionContext`](execution-model.md) from your arguments. If you passed an `Identity`, `user_id` and `tenant_id` come from it, and a `user_id=` or `tenant_id=` that contradicts the identity fails the run. For a nested run (`parent=ctx`), the child inherits the parent's identity, shares its budget and may only narrow its policy.
 2. **Resolve the workload.** An unknown name is a `routing` error. If the policy has an `allowed_agents` list, the target must be on it.
 3. **Check the idempotency key.** If you passed `idempotency_key` and a run with that key already **completed**, you get its saved result back with `replayed=True` and nothing runs again. If a run with that key is still `running` (or was interrupted), the new call is refused: use [`resume`](state.md). Keys are scoped per tenant, so two tenants can use the same key.
-4. **Admission control.** For a top-level run only: the per-tenant and per-user [rate limits](../guides/rate-limits.md), the per-tenant concurrency cap, and the global concurrency limit. A refusal ends the run as `budget_exhausted`. Draco rejects rather than queues, so one tenant cannot fill the queue.
-5. **Persist and announce.** The record is saved as `running` and `execution.started` is emitted. **Critical** hooks run first and can veto the run by raising `PolicyViolation`.
+4. **Admission control.** For a top-level run only: the per-tenant and per-user [rate limits](../guides/rate-limits.md), the per-tenant concurrency cap, and the global concurrency limit. The rate limits and the per-tenant cap **reject** a run that is over the limit, ending it as `budget_exhausted`, so one tenant cannot fill the queue. The global concurrency limit (`max_concurrency`) is different: extra runs **wait** for a free slot, and the time spent waiting counts against their deadline.
+5. **Persist and announce.** The record is saved as `running` and `execution.started` is emitted. **Critical** hooks run first and can veto the run by raising (normally `PolicyViolation`; any exception from a critical hook stops the run).
 6. **Authorize.** The harness's authorizer checks `workload.run` for this identity. With `require_identity`, no identity means denial here.
 7. **Input guardrails.** Your guardrails see the input. Any exception blocks the run, not just `PolicyViolation` (fail closed).
 8. **Run your workload.** It executes as a task under the deadline and cancellation token. Inside it, the tool runtime, model calls and nested runs each charge the same budget.
 9. **Output guardrails.** They see what the workload returned.
-10. **Finish.** The harness works out usage, saves the final record, emits `execution.finished` (or `failed`, `cancelled`, `timeout`, `budget_exhausted`), and returns the result.
+10. **Finish.** The harness works out usage, saves the final record, emits `execution.finished` (preceded by `execution.failed`, `execution.cancelled`, `execution.timeout` or `execution.budget_exhausted` when the run ended that way), and returns the result.
 
 Whatever goes wrong, the outcome is a normal `ExecutionResult` with a non-`completed` status and an `error` that says why.
 
@@ -72,7 +72,7 @@ If a guardrail itself crashes, the run is blocked, because a broken safety check
 `h.on(pattern, handler, critical=False)` subscribes to events such as `execution.started`, `tool.before` and `step.completed` (see [events](../reference/events.md)).
 
 - A normal handler is for observing: metrics, audit export. If it raises, the error is recorded and the run continues. **Telemetry can never break a run.**
-- A `critical=True` handler is for enforcing: quotas, tenant blocks, approvals. It runs before normal handlers, and if it raises `PolicyViolation` on `execution.started` or `tool.before`, the run or the tool call is stopped.
+- A `critical=True` handler is for enforcing: quotas, tenant blocks, approvals. It runs before normal handlers, and if it raises (normally `PolicyViolation`) on `execution.started` or `tool.before`, the run or the tool call is stopped. Any exception from a critical handler propagates; only normal handlers are isolated.
 
 ## What `run` never does
 
