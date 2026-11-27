@@ -61,7 +61,7 @@ Problems in the RAG service (API-key auth, uploads, web fetching, ingestion, doc
 These are documented and are not, by themselves, vulnerabilities. Read them before deploying:
 
 - [docs/api-guide.md](docs/api-guide.md) (Security) lists what Draco enforces, what you must configure, and known gaps.
-- **Committed runtime files in Git history.** Earlier commits contained runtime files. Treat anything that was ever in this repository's history as exposed and rotate the credentials involved. [docs/HISTORY_PURGE.md](docs/HISTORY_PURGE.md) describes the purge, and `scripts/check_history_exposure.sh` checks exposure.
+- **Committed runtime files in earlier Git history.** They were removed from all branches on 2026-11-27, but copies made before then (clones, forks, GitHub's cached pull-request refs) may remain. Treat anything that was ever committed here as exposed and rotate the credentials involved. [docs/HISTORY_PURGE.md](docs/HISTORY_PURGE.md) has the details, and `scripts/check_history_exposure.sh` checks a clone.
 - Draco supports tenant isolation, but you must supply authentication and configure authorization (see the API guide).
 
 ## Handling secrets when contributing

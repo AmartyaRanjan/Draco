@@ -119,7 +119,7 @@ A RAG example over a real retrieval service lives in draco-rag (`examples/b_rag.
 - No authentication provider ships with Draco; you supply the `Identity`.
 - The rate limiter and the tracer's in-memory trace are per process.
 - Prompt-injection detection (`draco.tools.safety`) is a heuristic.
-- ⚠️ **Historical exposure:** files that were committed earlier (runtime data from the RAG app, plus personal documents) are still in this repository's published Git history. Treat them as exposed. Purge runbook: [docs/HISTORY_PURGE.md](docs/HISTORY_PURGE.md). To check exposure, run `scripts/check_history_exposure.sh`.
+- **History rewritten (2026-11-27):** runtime data and personal documents that were committed earlier were removed from every branch. Clones and forks made before that date still hold the old history, and GitHub may still serve old commits through closed pull requests. Details: [docs/HISTORY_PURGE.md](docs/HISTORY_PURGE.md). To check a clone, run `scripts/check_history_exposure.sh`.
 
 ## 🗺️ Roadmap
 Planned work, kept separate from what is implemented: [docs/architecture/roadmap.md](docs/architecture/roadmap.md).

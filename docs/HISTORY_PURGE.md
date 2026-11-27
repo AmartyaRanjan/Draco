@@ -1,5 +1,24 @@
 # Purging runtime data from Git history (DRACO-010)
 
+## Status (2026-11-27)
+
+**Done:** history was rewritten with `git filter-repo` and force-pushed to all five branches of
+AmartyaRanjan/Draco. Removed from every commit: `app/storage/`, `eval_results/`, `documents/`, every
+`.pdf`/`.docx`/`.pptx`/`.ipynb` file, `MCTS.py`, `random_walk.py`, `trajectory_sampling.py`,
+`Exercise_lab7.txt` and `colorize.design-*.css`. One identifier (a university registration number inside the
+old eval datasets) was replaced with `REG-NO-REDACTED`. Every branch tip has the same files as before, minus the
+removed paths. All commit hashes after the first affected commit changed. The rewrite was done in a separate
+clone and the result was verified with `scripts/check_history_exposure.sh` before pushing.
+
+**Not done, and cannot be done from a clone:**
+- GitHub keeps a hidden ref for every pull request (`refs/pull/N/head`, 29 of them) that still points at the old
+  commits, so the old files can still be fetched by their object id. Removing them needs GitHub Support
+  ("sensitive data removal"), or deleting and recreating the repository.
+- The fork `harshitsharmaaaa/Draco` and any other clone made before this date keep their own copies.
+- Treat the removed documents as published. Rotate or remove anything sensitive in them.
+
+The text below is the original runbook, kept for reference and for repeating the purge.
+
 Older commits published runtime files that were later deleted from the tree.
 Deletion does not rewrite history: the blobs remain reachable from the commits
 that contained them, from every existing clone, and from GitHub's cached views.
