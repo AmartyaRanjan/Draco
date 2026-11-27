@@ -7,7 +7,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with: {python-version: "3.14"}
       - name: Install (CPU torch; docling is only needed by the ingestion worker)
         run: |
@@ -33,7 +33,7 @@ jobs:
     name: draco-core (py${{ matrix.python-version }})
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with: {python-version: "${{ matrix.python-version }}"}
       - name: Install draco with dev tools only
         run: |
