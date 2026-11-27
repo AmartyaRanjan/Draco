@@ -3,7 +3,7 @@
 #   docker build --build-arg TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu -t rag-api .   # CPU-only, much smaller
 # GPU embeddings/reranking need the NVIDIA runtime (docker run --gpus all). Ingestion runs in the separate worker image
 # (deploy/worker/Dockerfile).
-FROM python:3.14-slim AS base
+FROM python:3.15-slim AS base
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 WORKDIR /srv
 ARG TORCH_INDEX_URL=""
