@@ -73,7 +73,7 @@ jobs:
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc && df -h /
       - uses: docker/setup-buildx-action@v3
       - name: Build API image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile
@@ -89,7 +89,7 @@ jobs:
           curl -fsS http://127.0.0.1:18000/health
           docker rm -f api
       - name: Build worker image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: deploy/worker/Dockerfile
