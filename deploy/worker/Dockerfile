@@ -4,7 +4,7 @@
 #   docker build -f deploy/worker/Dockerfile --build-arg TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu -t rag-worker .
 # Models (Docling layout/OCR, BGE-M3) are downloaded on first use into $HF_HOME; mount a volume there so restarts do not
 # re-download them, or pre-seed it.
-FROM python:3.14-slim
+FROM python:3.15-slim
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 # Shared libraries used by Docling's image/OCR stack (OpenCV, pdfium).
 RUN apt-get update && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 && rm -rf /var/lib/apt/lists/*
