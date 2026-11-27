@@ -37,7 +37,7 @@ Changelog = "https://github.com/AmartyaRanjan/Draco/blob/main/docs/DRACO_CHANGEL
 "Security Policy" = "https://github.com/AmartyaRanjan/Draco/blob/main/SECURITY.md"
 
 [project.optional-dependencies]
-agents = ["langgraph>=1.0", "langchain-core", "langgraph-checkpoint-sqlite>=2.0"]  # draco.adapters.langgraph
+agents = ["langgraph>=1.0", "langchain-core", "langgraph-checkpoint-sqlite>=3.1.3"]  # draco.adapters.langgraph
 providers = ["httpx>=0.27"]                      # draco.adapters.providers (OpenAI-compatible, Anthropic)
 app = ["httpx>=0.27"]                            # adapters for the bundled starter app (plus requirements.txt)
 mcp = ["mcp>=1.0"]
