@@ -3,7 +3,7 @@
 Duck-typed against the client surface shared by `mcp.Client` and `mcp.ClientSession`
 (`await list_tools()`, `await call_tool(name, arguments)`), so the core never imports the `mcp`
 package. Verified against mcp 2.3.0 (see tests/draco/integration/test_mcp_real.py); install it with
-`pip install draco[mcp]`.
+`pip install draco-harness[mcp]`.
 
 Remote servers are untrusted. Descriptions are sanitized, outputs are flagged untrusted, nothing is
 imported unless explicitly allow-listed, tools are treated as state-mutating (never auto-retried)

@@ -1,0 +1,60 @@
+name: release
+# Builds the package on every run. Publishing happens only for a published GitHub release, through PyPI trusted
+# publishing (OIDC): no API token is stored in this repository. One-time setup is described in docs/RELEASING.md.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: "Where to publish (testpypi, or none to only build and check)"
+        type: choice
+        options: [none, testpypi]
+        default: none
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with: {python-version: "3.14"}
+      - name: Build sdist and wheel, then check the metadata
+        run: |
+          python -m pip install --upgrade build twine
+          python -m build
+          twine check --strict dist/*
+      - name: Wheel installs in a clean venv and imports without app code or heavy deps
+        run: |
+          python -m venv /tmp/clean && /tmp/clean/bin/pip install dist/*.whl
+          cd /tmp && /tmp/clean/bin/python -I -c "import sys, draco, draco.tools; assert not {'app','torch','langgraph'} & set(sys.modules)"
+      - name: The tag matches the package version (releases only)
+        if: github.event_name == 'release'
+        run: |
+          v="$(python -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")"
+          test "v$v" = "${{ github.event.release.tag_name }}" || { echo "tag ${{ github.event.release.tag_name }} != version $v"; exit 1; }
+      - uses: actions/upload-artifact@v4
+        with: {name: dist, path: dist/}
+
+  publish-testpypi:
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.repository == 'testpypi'
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions: {id-token: write}
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {name: dist, path: dist/}
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with: {repository-url: "https://test.pypi.org/legacy/"}
+
+  publish-pypi:
+    needs: build
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions: {id-token: write}
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {name: dist, path: dist/}
+      - uses: pypa/gh-action-pypi-publish@release/v1

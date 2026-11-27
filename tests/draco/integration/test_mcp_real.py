@@ -1,4 +1,4 @@
-"""Against the real MCP SDK (optional: `pip install draco[mcp]`). Skipped when `mcp` is absent."""
+"""Against the real MCP SDK (optional: `pip install draco-harness[mcp]`). Skipped when `mcp` is absent."""
 import pytest
 
 mcp = pytest.importorskip("mcp")
