@@ -1,4 +1,4 @@
-"""Optional OpenTelemetry exporter (`pip install draco[otel]`): one span per execution, parented by
+"""Optional OpenTelemetry exporter (`pip install draco-harness[otel]`): one span per execution, parented by
 the Draco parent/child relationship, with lifecycle/tool/model events attached as span events.
 It is an `Exporter` for the existing Tracer, not a second tracing system."""
 from __future__ import annotations

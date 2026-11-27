@@ -1,4 +1,4 @@
-"""Encryption at rest for persisted payloads (`pip install draco[crypto]`).
+"""Encryption at rest for persisted payloads (`pip install draco-harness[crypto]`).
 
 `FernetCipher` implements `draco.state.PayloadCipher` with `cryptography`'s MultiFernet (AES-128-CBC +
 HMAC-SHA256, authenticated). Keys come from a `SecretProvider` as one secret holding comma-separated
@@ -17,7 +17,7 @@ def _fernet() -> Any:
     try:
         from cryptography import fernet
     except ImportError as exc:  # pragma: no cover - depends on the environment
-        raise ConfigurationError("encryption at rest needs cryptography: pip install 'draco[crypto]'") from exc
+        raise ConfigurationError("encryption at rest needs cryptography: pip install 'draco-harness[crypto]'") from exc
     return fernet
 
 

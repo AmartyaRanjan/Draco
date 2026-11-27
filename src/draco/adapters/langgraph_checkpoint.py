@@ -85,14 +85,14 @@ def build_sqlite_checkpointer(path: str | Path) -> Any:
     """Create LangGraph's optional SQLite saver for durable graph state.
 
     The returned saver owns its SQLite connection; close ``saver.conn`` when
-    its lifecycle ends. Install ``draco[agents]`` to enable this helper.
+    its lifecycle ends. Install ``draco-harness[agents]`` to enable this helper.
     """
     try:
         from langgraph.checkpoint.sqlite import SqliteSaver
     except ImportError as exc:
         raise ImportError(
             "SQLite checkpointing requires the optional agents dependencies; "
-            "install with: pip install 'draco[agents]'"
+            "install with: pip install 'draco-harness[agents]'"
         ) from exc
 
     db_path = str(path)
@@ -116,7 +116,7 @@ def resume_command(decision: str) -> Any:
         from langgraph.types import Command
     except ImportError as exc:
         raise ImportError(
-            "LangGraph is required for resume_command; install with: pip install 'draco[agents]'"
+            "LangGraph is required for resume_command; install with: pip install 'draco-harness[agents]'"
         ) from exc
     return Command(resume={"decision": decision})
 

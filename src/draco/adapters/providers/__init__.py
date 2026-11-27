@@ -1,1 +1,1 @@
-"""Concrete `ModelProvider` implementations. Optional: `pip install draco[providers]` (httpx)."""
+"""Concrete `ModelProvider` implementations. Optional: `pip install draco-harness[providers]` (httpx)."""

@@ -1,4 +1,4 @@
-"""Example H: an external framework (LangGraph) integrated through an adapter. Needs `pip install draco[agents]`.
+"""Example H: an external framework (LangGraph) integrated through an adapter. Needs `pip install draco-harness[agents]`.
 LangGraph owns graph execution; Draco adds identity, budgets, deadlines, events and interrupt/resume."""
 import asyncio
 
