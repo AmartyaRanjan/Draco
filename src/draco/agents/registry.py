@@ -10,6 +10,7 @@ from draco.harness.runner import Harness
 
 @dataclass(frozen=True)
 class AgentSpec:
+    """An agent's name, description and capability labels, as seen by the router."""
     name: str
     description: str = ""
     capabilities: frozenset[str] = frozenset()

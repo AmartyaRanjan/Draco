@@ -21,6 +21,10 @@ person publishes a GitHub release (or starts the workflow manually for TestPyPI)
 3. In the GitHub repository settings, create two environments named `pypi` and `testpypi`. Add yourself as a
    required reviewer on `pypi` so a release cannot publish without your approval.
 
+## Publishing the documentation
+
+The site at <https://amartyaranjan.github.io/Draco/> is built by the `docs` workflow and published to GitHub Pages on every push to `main` that changes `docs/`, `mkdocs.yml`, `src/` or `pyproject.toml`. One-time setup: in the repository, **Settings > Pages > Build and deployment > Source: GitHub Actions**. Pull requests build the site (with `--strict`) but do not publish it.
+
 ## Releasing
 
 1. Update `version` in `pyproject.toml` and add a dated entry to [DRACO_CHANGELOG.md](DRACO_CHANGELOG.md). Merge it.

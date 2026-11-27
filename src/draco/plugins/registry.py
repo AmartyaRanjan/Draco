@@ -70,6 +70,10 @@ class Plugin:
 
 
 class PluginHost:
+    """Registers plugins, starts them in dependency order (providers before dependents), and stops them in
+    reverse. Cycles, duplicates and missing dependencies are errors before anything runs; if a plugin fails to
+    start, the ones already started are stopped and a `PluginError` is raised.
+    """
     def __init__(self, services: ServiceRegistry | None = None, bus: EventBus | None = None,
                  config: dict[str, Any] | None = None):
         self.services = services or ServiceRegistry()

@@ -137,6 +137,37 @@ async def test_resume_and_cancel_are_tenant_isolated():
     assert (await task).status == Status.cancelled
 
 
+async def test_another_tenant_cannot_learn_the_state_of_an_execution_through_resume():
+    """A foreign caller gets the same answer as for a missing id whatever state the execution is in; before the
+    tenant check came first, a completed run answered 'is completed and cannot be resumed'."""
+    from draco.core import ContractError, Waiting
+
+    h = Harness(DracoSettings())
+
+    async def done(ctx, inp):
+        return "ok"
+
+    async def pause(ctx, inp):
+        return Waiting("needs approval")
+    h.register("done", done)
+    h.register("pause", pause)
+    completed = await h.run("done", identity=ALICE)
+    waiting = await h.run("pause", identity=ALICE)
+    assert completed.status == Status.completed and waiting.status == Status.waiting
+
+    async def answer(execution_id, **kw):
+        with pytest.raises(ContractError) as exc:
+            await h.resume(execution_id, **kw)
+        return str(exc.value).replace(execution_id, "<id>")
+
+    missing = await answer("no-such-execution", identity=BOB)
+    for run in (completed, waiting):
+        assert await answer(run.execution_id, identity=BOB) == missing
+        assert await answer(run.execution_id) == missing  # no identity at all
+    # the owner still gets the real reason
+    assert "completed and cannot be resumed" in await answer(completed.execution_id, identity=ALICE)
+
+
 async def test_sqlite_store_persists_identity_and_migrates_old_schema(tmp_path):
     import sqlite3
 

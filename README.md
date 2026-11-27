@@ -7,7 +7,7 @@
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
 ![Status: alpha](https://img.shields.io/badge/status-alpha-orange)
 
-[📖 Documentation](docs/README.md) · [🤝 Contributing](CONTRIBUTING.md) · [🛡️ Security](SECURITY.md) · [🗺️ Roadmap](docs/architecture/roadmap.md) · [📜 Changelog](docs/DRACO_CHANGELOG.md)
+[📖 Documentation](https://amartyaranjan.github.io/Draco/) · [🤝 Contributing](CONTRIBUTING.md) · [🛡️ Security](SECURITY.md) · [🗺️ Roadmap](docs/architecture/roadmap.md) · [📜 Changelog](docs/DRACO_CHANGELOG.md)
 
 ---
 

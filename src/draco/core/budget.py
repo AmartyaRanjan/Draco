@@ -10,6 +10,14 @@ from draco.core.errors import BudgetExhausted
 
 @dataclass(frozen=True)
 class BudgetLimits:
+    """Ceilings for one execution and everything it spawns. `None` means unlimited, except `max_depth`
+    (default 8). All values must be positive. Exceeding a limit ends the execution with status
+    `budget_exhausted` and the resource name in the error details.
+
+    `max_model_calls`, `max_tool_calls`, `max_retries` and `max_tokens` are counts; `max_duration_s` is
+    wall-clock seconds (exceeding it ends the run as `timeout`); `max_depth` bounds nesting of child executions.
+    `max_concurrency` is accepted but not enforced here: use `DracoSettings.max_concurrency` to bound parallel runs.
+    """
     max_model_calls: int | None = None
     max_tool_calls: int | None = None
     max_duration_s: float | None = None

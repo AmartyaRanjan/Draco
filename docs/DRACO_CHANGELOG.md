@@ -4,6 +4,16 @@ Newest first. The RAG service's own changelog moved to [draco-rag](https://githu
 
 ## Unreleased: the RAG service moves to its own repository; the package is now `draco-harness`
 
+### Added
+- **Documentation site** (MkDocs Material, published to GitHub Pages): getting started, three tutorials, concepts, how-to guides and reference, with a Python API reference generated from docstrings. Every runnable example in the docs is executed by `tests/draco/unit/test_docs_examples.py`, including the output shown, so the docs cannot drift from the code.
+- Docstrings for the main public types and entry points (`Harness`, `Policy`, `BudgetLimits`, `ExecutionContext`, `ExecutionResult`, the errors, `Tool`, `Router`, `PluginHost`, the stores and exporters).
+- `docs` extra now includes `mkdocstrings[python]` and pins `mkdocs<2`.
+
+### Fixed
+- **`Harness.resume` leaked the state of another tenant's execution.** The status check ran before the tenant check, so a caller from another tenant who resumed a *completed* run got "is completed and cannot be resumed" instead of "unknown execution", revealing that the run exists and how it ended (a waiting or failed run already answered correctly). The tenant check now comes first, and a regression test covers completed and waiting runs.
+- Docs: the pages written for the new site were fact-checked against the source and corrected, including: the global `max_concurrency` makes extra runs wait (only `max_concurrency_per_tenant` rejects); `BudgetLimits.max_concurrency` is not enforced; an exceeded `max_duration_s` ends a run as `timeout`; the shipped providers' retryable HTTP statuses are 408, 409, 425, 429, 500, 502, 503, 504 and 529; the default `redact_keys` match by substring, so `tokens` counts in traces show as `<redacted>`.
+- Docs: the order of checks in `ToolRuntime.call` was described with argument validation first. The code authorizes first and charges the budget before validating, so a denied call costs nothing and an allowed-but-invalid call costs one tool call.
+
 ### Changed (packaging)
 - The distribution is named **`draco-harness`** (the name `draco` on PyPI belongs to an unrelated project). Install with `pip install draco-harness[extra]`; the import name stays `draco`. Error messages and docs that suggested `pip install draco[...]` now say `draco-harness[...]`. Nothing was ever published under the old name, so there is no upgrade path to handle.
 - Releases are built and published from GitHub Actions with PyPI trusted publishing (`.github/workflows/release.yml`).

@@ -23,6 +23,7 @@ class Resource:
 
 @dataclass(frozen=True)
 class Decision:
+    """The answer from an authorizer: allowed or not, with a reason. Build with `Decision.allow()` or `Decision.deny(reason)`."""
     allowed: bool
     reason: str = ""
 
@@ -37,6 +38,7 @@ class Decision:
 
 @runtime_checkable
 class Authorizer(Protocol):
+    """Protocol for deciding whether an identity may perform an action on a resource. May be sync or async. Any exception or malformed answer is treated as a denial."""
     def authorize(self, identity: Identity | None, action: str, resource: Resource) -> Awaitable[Decision] | Decision: ...
 
 
